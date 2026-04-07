@@ -1,0 +1,197 @@
+import { useState } from 'react';
+import { useReports, type TimeWindow } from '../hooks/useReports';
+import { BarChart3, TrendingUp, Download, PieChart, FileText } from 'lucide-react';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
+
+export function Reports() {
+  const [timeWindow, setTimeWindow] = useState<TimeWindow>('month');
+  const { totalSales, totalProfit, topProducts, sales } = useReports(timeWindow);
+
+  const handleExportCSV = () => {
+    if (sales.length === 0) return alert('No data to export for this period.');
+
+    const headers = ['Receipt ID', 'Date', 'Items Sold', 'Total Sales', 'Total Profit'];
+    const rows = sales.map(s => [
+      s.receiptId,
+      new Date(s.timestamp).toLocaleString(),
+      s.items.reduce((sum, item) => sum + item.quantity, 0).toString(),
+      s.total.toFixed(2),
+      s.totalProfit.toFixed(2)
+    ]);
+
+    const csvContent = "data:text/csv;charset=utf-8," 
+      + [headers.join(','), ...rows.map(e => e.join(','))].join("\n");
+
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `POS_Report_${timeWindow}_${Date.now()}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleExportPDF = () => {
+    if (sales.length === 0) return alert('No data to export for this period.');
+    
+    const doc = new jsPDF();
+    
+    // Header
+    doc.setFontSize(20);
+    doc.text('Business Performance Report', 14, 22);
+    doc.setFontSize(12);
+    doc.setTextColor(100);
+    doc.text(`Period: ${timeWindow.toUpperCase()}`, 14, 30);
+    doc.text(`Generated on: ${new Date().toLocaleString()}`, 14, 36);
+
+    // Summary Cards
+    doc.setDrawColor(200);
+    doc.setFillColor(248, 250, 252);
+    doc.rect(14, 45, 85, 25, 'FD'); // Sales Rect
+    doc.rect(110, 45, 85, 25, 'FD'); // Profit Rect
+
+    doc.setTextColor(0);
+    doc.setFontSize(10);
+    doc.text('Total Sales', 18, 52);
+    doc.text('Total Profit', 114, 52);
+
+    doc.setFontSize(16);
+    doc.setFont('helvetica', 'bold');
+    doc.text(`$${totalSales.toFixed(2)}`, 18, 62);
+    doc.setTextColor(22, 163, 74); // Green for profit
+    doc.text(`$${totalProfit.toFixed(2)}`, 114, 62);
+
+    // Table Data
+    doc.setFontSize(14);
+    doc.setTextColor(0);
+    doc.text('Transaction History', 14, 85);
+
+    const tableRows = sales.map(s => [
+      s.receiptId,
+      new Date(s.timestamp).toLocaleDateString(),
+      s.items.length.toString(),
+      `$${s.total.toFixed(2)}`,
+      `$${s.totalProfit.toFixed(2)}`
+    ]);
+
+    autoTable(doc, {
+      startY: 90,
+      head: [['Receipt ID', 'Date', 'Unique Items', 'Sales', 'Profit']],
+      body: tableRows,
+      theme: 'grid',
+      headStyles: { fillColor: [37, 99, 235] },
+      margin: { top: 10, bottom: 20 },
+    });
+
+    const finalY = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 15;
+    
+    if (topProducts.length > 0) {
+      doc.text('Top Selling Products', 14, finalY);
+      const topRows = topProducts.map(p => [p.name, p.quantity.toString(), `$${p.revenue.toFixed(2)}`]);
+      autoTable(doc, {
+        startY: finalY + 5,
+        head: [['Product Name', 'Qty Sold', 'Revenue']],
+        body: topRows,
+        theme: 'striped',
+        headStyles: { fillColor: [100, 116, 139] },
+      });
+    }
+
+    doc.save(`POS_Report_${timeWindow}_${Date.now()}.pdf`);
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
+      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
+        <div>
+          <h1 style={{ fontSize: '2rem', fontWeight: 800 }}>Reporting & Analytics</h1>
+          <p style={{ color: 'var(--text-muted)' }}>Analyze sales, profit margins, and top products.</p>
+        </div>
+        <div style={{ display: 'flex', gap: '12px' }}>
+          <select 
+            value={timeWindow} 
+            onChange={e => setTimeWindow(e.target.value as TimeWindow)}
+            style={{ width: 'auto' }}
+          >
+            <option value="day">Today</option>
+            <option value="week">Past 7 Days</option>
+            <option value="month">Past 30 Days</option>
+            <option value="quarter">Past Quarter</option>
+            <option value="6months">Past 6 Months</option>
+            <option value="year">Past Year</option>
+          </select>
+          <button className="btn-secondary" onClick={handleExportCSV}>
+            <Download size={18} /> CSV
+          </button>
+          <button className="btn-primary" onClick={handleExportPDF}>
+            <FileText size={18} /> Export PDF
+          </button>
+        </div>
+      </header>
+
+      {/* KPI Cards */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '24px' }}>
+        <div className="card" style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+          <div style={{ background: '#e0e7ff', padding: '16px', borderRadius: '16px' }}>
+            <BarChart3 size={32} color="var(--primary)" />
+          </div>
+          <div>
+            <p style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-muted)' }}>Total Revenue</p>
+            <h2 style={{ fontSize: '1.75rem', fontWeight: 800 }}>${totalSales.toFixed(2)}</h2>
+          </div>
+        </div>
+        
+        <div className="card" style={{ display: 'flex', alignItems: 'center', gap: '20px', borderLeft: '4px solid var(--success)' }}>
+          <div style={{ background: '#dcfce7', padding: '16px', borderRadius: '16px' }}>
+            <TrendingUp size={32} color="var(--success)" />
+          </div>
+          <div>
+            <p style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-muted)' }}>Total Profit Margin</p>
+            <h2 style={{ fontSize: '1.75rem', fontWeight: 800 }}>${totalProfit.toFixed(2)}</h2>
+            <p style={{ fontSize: '0.8rem', color: 'var(--success)' }}>
+              {totalSales > 0 ? ((totalProfit / totalSales) * 100).toFixed(1) : '0'}% margin
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Top Products */}
+      <div className="card">
+        <h3 style={{ marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <PieChart size={20} color="var(--primary)" />
+          Top Performing Products
+        </h3>
+        
+        {topProducts.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '32px', color: 'var(--text-muted)' }}>
+            No sales data for this period.
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+            {topProducts.map((product, idx) => {
+              const maxQty = topProducts[0].quantity;
+              const widthRatio = (product.quantity / maxQty) * 100;
+              return (
+                <div key={idx} style={{ position: 'relative' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', zIndex: 1, position: 'relative' }}>
+                    <span style={{ fontWeight: 600 }}>{product.name}</span>
+                    <span style={{ color: 'var(--text-muted)' }}>{product.quantity} sold (${product.revenue.toFixed(2)})</span>
+                  </div>
+                  <div style={{ background: 'var(--background)', height: '12px', borderRadius: '6px', overflow: 'hidden' }}>
+                    <div style={{ 
+                      height: '100%', 
+                      background: 'var(--primary)', 
+                      width: `${widthRatio}%`,
+                      opacity: 1 - (idx * 0.15) // Gradient effect for top lists
+                    }}></div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
