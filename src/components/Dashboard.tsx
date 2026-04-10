@@ -1,20 +1,51 @@
 import { useInventory } from '../hooks/useInventory';
-import { useSales } from '../hooks/useSales';
-import { TrendingUp, Package, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { TrendingUp, Package, AlertTriangle, CheckCircle2, Wallet } from 'lucide-react';
+import { db } from '../db/db';
+import { useLiveQuery } from 'dexie-react-hooks';
 
 export function Dashboard() {
   const { products, getLowStockProducts } = useInventory();
-  const { sales } = useSales();
+  
+  const securityModeSetting = useLiveQuery(() => db.settings.get('security_mode'));
+  const isOwner = securityModeSetting?.value !== 'staff';
 
   const lowStock = getLowStockProducts();
-  const todayTotal = sales
-    .filter(s => new Date(s.timestamp).toDateString() === new Date().toDateString())
-    .reduce((sum, s) => sum + s.total, 0);
+
+  // Optimized Indexed Queries for Today
+  const todayStart = new Date().setHours(0, 0, 0, 0);
+  const todayEnd = new Date().setHours(23, 59, 59, 999);
+
+  const stats = useLiveQuery(async () => {
+    const todaySales = await db.sales
+      .where('timestamp')
+      .between(todayStart, todayEnd)
+      .toArray();
+    
+    const todayExpenses = await db.expenses
+      .where('timestamp')
+      .between(todayStart, todayEnd)
+      .toArray();
+
+    const totalSales = todaySales.reduce((sum, s) => sum + s.total, 0);
+    const grossProfit = todaySales.reduce((sum, s) => sum + (s.totalProfit || 0), 0);
+    const totalExpenses = todayExpenses.reduce((sum, e) => sum + e.amount, 0);
+
+    return {
+      totalSales,
+      grossProfit,
+      totalExpenses,
+      netProfit: grossProfit - totalExpenses
+    };
+  }, [todayStart, todayEnd]) || { totalSales: 0, grossProfit: 0, totalExpenses: 0, netProfit: 0 };
 
   const kpis = [
-    { label: "Today's Sales", value: `$${todayTotal.toFixed(2)}`, icon: <TrendingUp size={32} color="var(--primary)" /> },
-    { label: "Total Products", value: products.length, icon: <Package size={32} color="var(--secondary)" /> },
-    { label: "Low Stock Items", value: lowStock.length, icon: <AlertTriangle size={32} color={lowStock.length > 0 ? "var(--danger)" : "var(--success)"} /> },
+    { label: "Today's Sales", value: `KES ${stats.totalSales.toLocaleString()}`, icon: <TrendingUp size={32} color="var(--primary)" /> },
+    ...(isOwner ? [
+      { label: "Today's Expenses", value: `KES ${stats.totalExpenses.toLocaleString()}`, icon: <Wallet size={32} color="var(--danger)" /> },
+      { label: "Net Profit", value: `KES ${stats.netProfit.toLocaleString()}`, icon: <TrendingUp size={32} color={stats.netProfit >= 0 ? "var(--success)" : "var(--danger)"} /> }
+    ] : []),
+    { label: "Total Stock Items", value: products.reduce((sum, p) => sum + p.quantity, 0).toLocaleString(), icon: <Package size={32} color="var(--secondary)" /> },
+    { label: "Low Stock Alerts", value: lowStock.length, icon: <AlertTriangle size={32} color={lowStock.length > 0 ? "var(--danger)" : "var(--success)"} /> },
   ];
 
   return (
@@ -25,7 +56,7 @@ export function Dashboard() {
       </header>
 
       {/* KPI Section */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '24px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: '24px' }}>
         {kpis.map(kpi => (
           <div key={kpi.label} className="card" style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
             <div style={{ background: '#f1f5f9', padding: '16px', borderRadius: '16px' }}>{kpi.icon}</div>

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useInventory } from '../hooks/useInventory';
 import { useSubscription } from '../hooks/useSubscription';
 import { type Product } from '../db/db';
-import { Plus, Edit2, Trash2, PackagePlus, Search, X } from 'lucide-react';
+import { Plus, Edit2, Trash2, PackagePlus, Search, X, AlertTriangle } from 'lucide-react';
 
 export function Inventory() {
   const { products, addProduct, updateProduct, deleteProduct, restockProduct } = useInventory();
@@ -17,7 +17,9 @@ export function Inventory() {
     price: 0,
     costPrice: 0,
     quantity: 0,
-    lowStockThreshold: 5
+    lowStockThreshold: 5,
+    category: 'General',
+    barcode: ''
   });
 
   const filteredProducts = products.filter(p => 
@@ -35,7 +37,7 @@ export function Inventory() {
       await addProduct(formData);
       setIsAdding(false);
     }
-    setFormData({ name: '', price: 0, costPrice: 0, quantity: 0, lowStockThreshold: 5 });
+    setFormData({ name: '', price: 0, costPrice: 0, quantity: 0, lowStockThreshold: 5, category: 'General', barcode: '' });
   };
 
   const startEdit = (product: Product) => {
@@ -45,15 +47,17 @@ export function Inventory() {
       price: product.price,
       costPrice: product.costPrice ?? 0,
       quantity: product.quantity,
-      lowStockThreshold: product.lowStockThreshold
+      lowStockThreshold: product.lowStockThreshold,
+      category: product.category || 'General',
+      barcode: product.barcode || ''
     });
   };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
         <div>
-          <h1 style={{ fontSize: '2rem', fontWeight: 800 }}>Inventory Management</h1>
+          <h1 style={{ fontSize: '2rem', fontWeight: 800 }}>My Store Management</h1>
           <p style={{ color: 'var(--text-muted)' }}>Track and manage your products and stock levels.</p>
         </div>
         <button 
@@ -86,6 +90,7 @@ export function Inventory() {
           <thead>
             <tr style={{ textAlign: 'left', borderBottom: '2px solid var(--border)', background: '#f8fafc' }}>
               <th style={{ padding: '16px' }}>Product Name</th>
+              <th style={{ padding: '16px' }}>Category</th>
               <th style={{ padding: '16px' }}>Price</th>
               <th style={{ padding: '16px' }}>Cost</th>
               <th style={{ padding: '16px' }}>Stock Level</th>
@@ -97,22 +102,41 @@ export function Inventory() {
             {filteredProducts.map(product => (
               <tr key={product.id} style={{ borderBottom: '1px solid var(--border)' }}>
                 <td style={{ padding: '16px', fontWeight: 600 }}>{product.name}</td>
-                <td style={{ padding: '16px' }}>${product.price.toFixed(2)}</td>
-                <td style={{ padding: '16px', color: 'var(--text-muted)' }}>${(product.costPrice ?? 0).toFixed(2)}</td>
+                <td style={{ padding: '16px' }}>{product.category || 'General'}</td>
+                <td style={{ padding: '16px' }}>KES {product.price.toLocaleString()}</td>
+                <td style={{ padding: '16px', color: 'var(--text-muted)' }}>KES {(product.costPrice ?? 0).toLocaleString()}</td>
                 <td style={{ padding: '16px' }}>
                   <span className={`stock-badge ${product.quantity <= product.lowStockThreshold ? 'stock-low' : 'stock-ok'}`}>
                     {product.quantity} units
                   </span>
                 </td>
                 <td style={{ padding: '16px', color: 'var(--text-muted)' }}>{product.lowStockThreshold}</td>
+                <td style={{ padding: '16px' }}>
+                  {(!product.costPrice || product.costPrice === 0) && (
+                    <span style={{ 
+                      background: '#fff7ed', 
+                      color: '#9a3412', 
+                      padding: '4px 8px', 
+                      borderRadius: '8px', 
+                      fontSize: '0.75rem', 
+                      fontWeight: 700,
+                      border: '1px solid #ffedd5',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px'
+                    }}>
+                      <AlertTriangle size={12} /> No Cost Set
+                    </span>
+                  )}
+                </td>
                 <td style={{ padding: '16px', textAlign: 'right', display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-                  <button onClick={() => restockProduct(product.id!, 10)} className="btn-secondary" style={{ padding: '8px' }} title="Quicks Add 10">
+                  <button onClick={() => restockProduct(product.id!, 10)} className="btn-secondary" style={{ padding: '8px' }} title="Quick Add 10" disabled={status === 'locked'}>
                     <PackagePlus size={18} />
                   </button>
-                  <button onClick={() => startEdit(product)} className="btn-secondary" style={{ padding: '8px' }}>
+                  <button onClick={() => startEdit(product)} className="btn-secondary" style={{ padding: '8px' }} disabled={status === 'locked'}>
                     <Edit2 size={18} />
                   </button>
-                  <button onClick={() => deleteProduct(product.id!)} className="btn-secondary" style={{ padding: '8px', color: 'var(--danger)' }}>
+                  <button onClick={() => deleteProduct(product.id!)} className="btn-secondary" style={{ padding: '8px', color: 'var(--danger)' }} disabled={status === 'locked'}>
                     <Trash2 size={18} />
                   </button>
                 </td>
@@ -132,18 +156,28 @@ export function Inventory() {
             </div>
             
             <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+                <div className="input-group">
+                  <label>Product Name</label>
+                  <input required type="text" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
+                </div>
+                <div className="input-group">
+                  <label>Barcode</label>
+                  <input type="text" value={formData.barcode} onChange={e => setFormData({...formData, barcode: e.target.value})} placeholder="Scan or type" />
+                </div>
+              </div>
               <div className="input-group">
-                <label>Product Name</label>
-                <input required type="text" value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} />
+                <label>Category</label>
+                <input required type="text" value={formData.category} onChange={e => setFormData({...formData, category: e.target.value})} placeholder="e.g. Hardware, Drinks, General" />
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                 <div className="input-group">
-                  <label>Price ($)</label>
-                  <input required type="number" step="0.01" value={formData.price} onChange={e => setFormData({...formData, price: parseFloat(e.target.value) || 0})} />
+                  <label>Price (KES)</label>
+                  <input required type="number" value={formData.price} onChange={e => setFormData({...formData, price: parseFloat(e.target.value) || 0})} />
                 </div>
                 <div className="input-group">
-                  <label>Cost Price ($)</label>
-                  <input required type="number" step="0.01" value={formData.costPrice} onChange={e => setFormData({...formData, costPrice: parseFloat(e.target.value) || 0})} />
+                  <label>Cost Price (KES)</label>
+                  <input required type="number" value={formData.costPrice} onChange={e => setFormData({...formData, costPrice: parseFloat(e.target.value) || 0})} />
                 </div>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
@@ -163,7 +197,7 @@ export function Inventory() {
                 style={{ width: '100%', marginTop: '12px' }}
                 disabled={status === 'locked'}
               >
-                {status === 'locked' ? 'Subscription Locked' : (editingId ? 'Update Product' : 'Create Product')}
+                {editingId ? 'Update Product' : 'Create Product'}
               </button>
             </form>
           </div>

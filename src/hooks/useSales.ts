@@ -49,15 +49,17 @@ export function useSales() {
 
   const clearCart = () => setCart([]);
 
-  const completeSale = async () => {
+  const completeSale = async (taxRate: number = 0, taxAmount: number = 0, paymentMethod: string = 'Cash', transactionCode?: string) => {
     if (cart.length === 0 || !businessId) return;
 
     const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
     const totalCost = cart.reduce((sum, item) => sum + item.costPrice * item.quantity, 0);
-    const totalProfit = total - totalCost;
+    // Correct Profit Calculation: Profit is Revenue minus Tax minus Cost of Goods
+    const totalProfit = total - taxAmount - totalCost;
     
     const receiptId = `REC-${Date.now()}`;
     const timestamp = Date.now();
+    const deviceId = (await db.settings.get('device_id'))?.value as string || 'UNKNOWN';
 
     const saleItems = cart.map(item => ({
       productId: item.id,
@@ -79,6 +81,11 @@ export function useSales() {
           timestamp,
           receiptId,
           items: saleItems,
+          taxRate,
+          taxAmount,
+          paymentMethod,
+          transactionCode,
+          deviceId,
         };
         await db.sales.add(newSale);
         

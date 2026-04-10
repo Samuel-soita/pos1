@@ -25,7 +25,9 @@ CREATE TABLE products (
     cost_price DECIMAL NOT NULL DEFAULT 0,
     quantity INT NOT NULL DEFAULT 0,
     low_stock_threshold INT NOT NULL DEFAULT 5,
-    updated_at BIGINT NOT NULL
+    updated_at BIGINT NOT NULL,
+    category TEXT DEFAULT 'General',
+    barcode TEXT
 );
 
 CREATE TABLE sales (
@@ -35,7 +37,10 @@ CREATE TABLE sales (
     total DECIMAL NOT NULL,
     total_profit DECIMAL NOT NULL,
     timestamp BIGINT NOT NULL,
-    items JSONB NOT NULL
+    items JSONB NOT NULL,
+    tax_rate DECIMAL,
+    tax_amount DECIMAL,
+    payment_method TEXT
 );
 
 CREATE TABLE purchases (
@@ -57,19 +62,29 @@ ALTER TABLE purchases ENABLE ROW LEVEL SECURITY;
 
 -- Production Security Policies
 CREATE POLICY "Users can access their own business" ON businesses 
-    FOR ALL USING (id = auth.uid());
+    FOR ALL 
+    USING (id = auth.uid())
+    WITH CHECK (id = auth.uid());
 
 CREATE POLICY "Users can manage devices for their business" ON devices 
-    FOR ALL USING (business_id = auth.uid());
+    FOR ALL 
+    USING (business_id = auth.uid())
+    WITH CHECK (business_id = auth.uid());
 
 CREATE POLICY "Users can access their products" ON products 
-    FOR ALL USING (business_id = auth.uid());
+    FOR ALL 
+    USING (business_id = auth.uid())
+    WITH CHECK (business_id = auth.uid());
 
 CREATE POLICY "Users can access their sales" ON sales 
-    FOR ALL USING (business_id = auth.uid());
+    FOR ALL 
+    USING (business_id = auth.uid())
+    WITH CHECK (business_id = auth.uid());
 
 CREATE POLICY "Users can access their purchases" ON purchases 
-    FOR ALL USING (business_id = auth.uid());
+    FOR ALL 
+    USING (business_id = auth.uid())
+    WITH CHECK (business_id = auth.uid());
 
 -- ==========================================
 -- 3. Stock Delta Merge Function (RPC)
@@ -81,8 +96,16 @@ CREATE OR REPLACE FUNCTION apply_stock_delta(
   p_product_id UUID,
   p_business_id UUID,
   p_quantity_change INT
-) RETURNS void AS $$
+) RETURNS void 
+SECURITY DEFINER
+SET search_path = public
+AS $$
 BEGIN
+  -- Prevent malicious remote stock manipulation of other businesses
+  IF auth.uid() != p_business_id THEN
+    RAISE EXCEPTION 'Unauthorized stock manipulation';
+  END IF;
+
   UPDATE products 
   SET quantity = quantity + p_quantity_change,
       updated_at = extract(epoch from now()) * 1000
@@ -96,7 +119,10 @@ $$ LANGUAGE plpgsql;
 -- Securely fetch the server's Unix timestamp to prevent local clock tampering.
 
 CREATE OR REPLACE FUNCTION get_server_timestamp() 
-RETURNS BIGINT AS $$
+RETURNS BIGINT 
+SECURITY DEFINER
+SET search_path = public
+AS $$
 BEGIN
   RETURN extract(epoch from now()) * 1000;
 END;

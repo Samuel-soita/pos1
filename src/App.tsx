@@ -6,12 +6,26 @@ import { Inventory } from './components/Inventory';
 import { History } from './components/History';
 import { Settings } from './components/Settings';
 import { Reports } from './components/Reports';
+import { Expenses } from './components/Expenses';
 import { AuthScreen } from './components/AuthScreen';
+import { StaffManagement } from './components/StaffManagement';
+import { PackageSelection } from './components/PackageSelection';
 import { useAuth } from './hooks/useAuth';
+
+import { InstallBanner } from './components/InstallBanner';
+import { PaymentModal } from './components/PaymentModal';
+import { useSubscription } from './hooks/useSubscription';
+import { useRecurringExpenses } from './hooks/useRecurringExpenses';
+
+import { UpdateManager } from './components/UpdateManager';
 
 function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
-  const { businessId, isLoading } = useAuth();
+  const { businessId, isLoading, business, userType } = useAuth();
+  const { status, needsDeposit } = useSubscription();
+
+  // Initialize background processors
+  useRecurringExpenses();
 
   useEffect(() => {
     const requestPersistentStorage = async () => {
@@ -31,7 +45,21 @@ function App() {
   }
 
   if (!businessId) {
-    return <AuthScreen />;
+    return (
+      <>
+        <AuthScreen />
+        <InstallBanner />
+        <UpdateManager />
+      </>
+    );
+  }
+
+  if (userType === 'owner' && !business?.packageId) {
+    return (
+      <Layout activeTab="settings" setActiveTab={setActiveTab}>
+        <PackageSelection />
+      </Layout>
+    );
   }
 
   const renderContent = () => {
@@ -42,10 +70,14 @@ function App() {
         return <Sales />;
       case 'inventory':
         return <Inventory />;
+      case 'staff':
+        return <StaffManagement />;
       case 'history':
         return <History />;
       case 'reports':
         return <Reports />;
+      case 'expenses':
+        return <Expenses />;
       case 'settings':
         return <Settings />;
       default:
@@ -54,9 +86,14 @@ function App() {
   };
 
   return (
-    <Layout activeTab={activeTab} setActiveTab={setActiveTab}>
-      {renderContent()}
-    </Layout>
+    <>
+      <Layout activeTab={activeTab} setActiveTab={setActiveTab}>
+        {renderContent()}
+      </Layout>
+      <InstallBanner />
+      <PaymentModal status={status} needsDeposit={!!needsDeposit} />
+      <UpdateManager />
+    </>
   );
 }
 

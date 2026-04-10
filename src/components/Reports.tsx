@@ -11,13 +11,15 @@ export function Reports() {
   const handleExportCSV = () => {
     if (sales.length === 0) return alert('No data to export for this period.');
 
-    const headers = ['Receipt ID', 'Date', 'Items Sold', 'Total Sales', 'Total Profit'];
+    const headers = ['Receipt ID', 'Date', 'Items Sold', 'Total Sales', 'Total Profit', 'Tax (Inclusive)', 'Tender Type'];
     const rows = sales.map(s => [
       s.receiptId,
       new Date(s.timestamp).toLocaleString(),
       s.items.reduce((sum, item) => sum + item.quantity, 0).toString(),
       s.total.toFixed(2),
-      s.totalProfit.toFixed(2)
+      s.totalProfit.toFixed(2),
+      (s.taxAmount || 0).toFixed(2),
+      s.paymentMethod || 'Cash'
     ]);
 
     const csvContent = "data:text/csv;charset=utf-8," 
@@ -58,9 +60,9 @@ export function Reports() {
 
     doc.setFontSize(16);
     doc.setFont('helvetica', 'bold');
-    doc.text(`$${totalSales.toFixed(2)}`, 18, 62);
+    doc.text(`KES ${totalSales.toLocaleString()}`, 18, 62);
     doc.setTextColor(22, 163, 74); // Green for profit
-    doc.text(`$${totalProfit.toFixed(2)}`, 114, 62);
+    doc.text(`KES ${totalProfit.toLocaleString()}`, 114, 62);
 
     // Table Data
     doc.setFontSize(14);
@@ -70,14 +72,14 @@ export function Reports() {
     const tableRows = sales.map(s => [
       s.receiptId,
       new Date(s.timestamp).toLocaleDateString(),
-      s.items.length.toString(),
-      `$${s.total.toFixed(2)}`,
-      `$${s.totalProfit.toFixed(2)}`
+      `KES ${s.total.toLocaleString()}`,
+      `KES ${(s.taxAmount || 0).toLocaleString()}`,
+      s.paymentMethod || 'Cash'
     ]);
 
     autoTable(doc, {
       startY: 90,
-      head: [['Receipt ID', 'Date', 'Unique Items', 'Sales', 'Profit']],
+      head: [['Receipt ID', 'Date', 'Sales', 'Tax Inc.', 'Tender']],
       body: tableRows,
       theme: 'grid',
       headStyles: { fillColor: [37, 99, 235] },
@@ -88,7 +90,7 @@ export function Reports() {
     
     if (topProducts.length > 0) {
       doc.text('Top Selling Products', 14, finalY);
-      const topRows = topProducts.map(p => [p.name, p.quantity.toString(), `$${p.revenue.toFixed(2)}`]);
+      const topRows = topProducts.map(p => [p.name, p.quantity.toString(), `KES ${p.revenue.toLocaleString()}`]);
       autoTable(doc, {
         startY: finalY + 5,
         head: [['Product Name', 'Qty Sold', 'Revenue']],
@@ -108,7 +110,7 @@ export function Reports() {
           <h1 style={{ fontSize: '2rem', fontWeight: 800 }}>Reporting & Analytics</h1>
           <p style={{ color: 'var(--text-muted)' }}>Analyze sales, profit margins, and top products.</p>
         </div>
-        <div style={{ display: 'flex', gap: '12px' }}>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px' }}>
           <select 
             value={timeWindow} 
             onChange={e => setTimeWindow(e.target.value as TimeWindow)}
@@ -131,14 +133,14 @@ export function Reports() {
       </header>
 
       {/* KPI Cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '24px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: '24px' }}>
         <div className="card" style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
           <div style={{ background: '#e0e7ff', padding: '16px', borderRadius: '16px' }}>
             <BarChart3 size={32} color="var(--primary)" />
           </div>
           <div>
             <p style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-muted)' }}>Total Revenue</p>
-            <h2 style={{ fontSize: '1.75rem', fontWeight: 800 }}>${totalSales.toFixed(2)}</h2>
+            <h2 style={{ fontSize: '1.75rem', fontWeight: 800 }}>KES {totalSales.toLocaleString()}</h2>
           </div>
         </div>
         
@@ -148,7 +150,7 @@ export function Reports() {
           </div>
           <div>
             <p style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-muted)' }}>Total Profit Margin</p>
-            <h2 style={{ fontSize: '1.75rem', fontWeight: 800 }}>${totalProfit.toFixed(2)}</h2>
+            <h2 style={{ fontSize: '1.75rem', fontWeight: 800 }}>KES {totalProfit.toLocaleString()}</h2>
             <p style={{ fontSize: '0.8rem', color: 'var(--success)' }}>
               {totalSales > 0 ? ((totalProfit / totalSales) * 100).toFixed(1) : '0'}% margin
             </p>
@@ -176,7 +178,7 @@ export function Reports() {
                 <div key={idx} style={{ position: 'relative' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px', zIndex: 1, position: 'relative' }}>
                     <span style={{ fontWeight: 600 }}>{product.name}</span>
-                    <span style={{ color: 'var(--text-muted)' }}>{product.quantity} sold (${product.revenue.toFixed(2)})</span>
+                    <span style={{ color: 'var(--text-muted)' }}>{product.quantity} sold (KES {product.revenue.toLocaleString()})</span>
                   </div>
                   <div style={{ background: 'var(--background)', height: '12px', borderRadius: '6px', overflow: 'hidden' }}>
                     <div style={{ 

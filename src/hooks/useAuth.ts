@@ -1,56 +1,108 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '../lib/supabase';
-import type { Session } from '@supabase/supabase-js';
+import { db, type Business, type Staff } from '../db/db';
 
 export function useAuth() {
-  const [session, setSession] = useState<Session | null>(null);
-  const [offlineBusinessId, setOfflineBusinessId] = useState<string | null>(localStorage.getItem('offlineBusinessId'));
+  const [userType, setUserType] = useState<'owner' | 'staff' | null>(null);
+  const [currentBusiness, setCurrentBusiness] = useState<Business | null>(null);
+  const [currentStaff, setCurrentStaff] = useState<Staff | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
+  // Persistence
   useEffect(() => {
-    // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session) {
-        setSession(session);
-        localStorage.setItem('offlineBusinessId', session.user.id);
-        setOfflineBusinessId(session.user.id);
+    async function loadSession() {
+      const bizId = localStorage.getItem('biz_id');
+      const staffId = localStorage.getItem('staff_id');
+      
+      if (bizId) {
+        const biz = await db.businesses.get(bizId);
+        if (biz) {
+          setCurrentBusiness(biz);
+          setUserType('owner');
+        }
+      }
+      
+      if (staffId) {
+        const staff = await db.staff.get(staffId);
+        if (staff) {
+          setCurrentStaff(staff);
+          setUserType('staff');
+        }
       }
       setIsLoading(false);
-    });
-
-    // Listen to auth changes
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-      if (session) {
-         localStorage.setItem('offlineBusinessId', session.user.id);
-         setOfflineBusinessId(session.user.id);
-      }
-    });
-
-    return () => subscription.unsubscribe();
+    }
+    loadSession();
   }, []);
 
-  const login = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) throw error;
+  const businessLogin = async (name: string, businessCode: string, pin: string) => {
+    // In a real app, this would query Supabase for the specific business record
+    const biz = await db.businesses
+      .where({ name: name.trim(), code: businessCode.trim(), pin: pin.trim() })
+      .first();
+      
+    if (!biz) throw new Error('Invalid Business Name, Code, or PIN');
+    
+    setCurrentBusiness(biz);
+    setUserType('owner');
+    localStorage.setItem('biz_id', biz.id);
+    return biz;
   };
 
-  const register = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signUp({ email, password });
-    if (error) throw error;
+  const staffLogin = async (businessCode: string, staffCode: string, pin: string) => {
+    const biz = await db.businesses.where('code').equals(businessCode).first();
+    if (!biz) throw new Error('Business Code not found');
+
+    const staff = await db.staff
+      .where({ businessId: biz.id, code: staffCode.trim(), pin: pin.trim() })
+      .first();
+
+    if (!staff) throw new Error('Invalid Staff Code or PIN');
+
+    setCurrentStaff(staff);
+    setUserType('staff');
+    localStorage.setItem('staff_id', staff.id);
+    localStorage.setItem('biz_id', biz.id); // Also store bizId for data scoping
+    return staff;
   };
 
-  const logout = async () => {
-    localStorage.removeItem('offlineBusinessId');
-    setOfflineBusinessId(null);
-    const { error } = await supabase.auth.signOut();
-    if (error) throw error;
+  const engineerSetup = async (name: string, code: string, pin: string, customFeatureCount: number = 0) => {
+    // Global Engineer Code check
+    if (pin !== '0000') throw new Error('Unauthorized: Invalid Engineer Tech Code');
+
+    const id = crypto.randomUUID();
+    const newBiz: Business = {
+      id,
+      name,
+      code,
+      pin: '1234', // Default PIN for the business owner to change later
+      packageId: 'hustler',
+      expiryDate: Date.now() + 5 * 24 * 60 * 60 * 1000,
+      status: 'active',
+      staffCount: 0,
+      customFeatureCount
+    };
+    await db.businesses.add(newBiz);
+    return newBiz;
   };
 
-  // If session drops (e.g. JWT expires while totally offline), fall back to the cached ID!
-  const businessId = session?.user?.id || offlineBusinessId;
+  const logout = () => {
+    localStorage.removeItem('biz_id');
+    localStorage.removeItem('staff_id');
+    setCurrentBusiness(null);
+    setCurrentStaff(null);
+    setUserType(null);
+  };
 
-  return { session, businessId, isLoading, login, register, logout };
+  const businessId = currentBusiness?.id || currentStaff?.businessId || localStorage.getItem('biz_id');
+
+  return { 
+    userType, 
+    business: currentBusiness, 
+    staff: currentStaff, 
+    businessId, 
+    isLoading, 
+    businessLogin, 
+    staffLogin, 
+    engineerSetup, 
+    logout 
+  };
 }
