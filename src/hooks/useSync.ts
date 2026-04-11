@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { db } from '../db/db';
 import { supabase } from '../lib/supabase';
 import { useLiveQuery } from 'dexie-react-hooks';
+import { POSReducer } from '../lib/reducer';
 
 export function useSync() {
   const [isSyncing, setIsSyncing] = useState(false);
@@ -21,340 +22,108 @@ export function useSync() {
   }, []);
 
   const pushLocalChanges = async () => {
-    // 1. Get all pending sync actions
-    const pendingItems = await db.sync_queue
-      .filter(item => item.status !== 'failed')
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return; // Cannot push without cloud identity
+
+    const allPendingEvents = await db.pos_events
+      .where('sync_status')
+      .equals('pending')
       .toArray();
-    pendingItems.sort((a, b) => a.timestamp - b.timestamp);
-    if (pendingItems.length === 0) return;
+    
+    if (allPendingEvents.length === 0) return;
 
-    for (const item of pendingItems) {
+    allPendingEvents.sort((a, b) => a.client_timestamp - b.client_timestamp);
+    
+    const batchSize = 100; // Free-tier optimized batching
+    for (let i = 0; i < allPendingEvents.length; i += batchSize) {
+      const pendingBatch = allPendingEvents.slice(i, i + batchSize);
+
       try {
-        if (item.table === 'sales') {
-          // Push Sale to Supabase
-          const snakeSale = {
-            id: item.payload.id,
-            business_id: item.payload.businessId,
-            receipt_id: item.payload.receiptId,
-            total: item.payload.total,
-            timestamp: item.payload.timestamp,
-            tax_rate: item.payload.taxRate || 0,
-            tax_amount: item.payload.taxAmount || 0,
-            payment_method: item.payload.paymentMethod || 'Cash',
-            device_id: item.payload.deviceId || 'UNKNOWN',
-            items: item.payload.items
-          };
-          const { error } = await supabase.from('sales').insert([snakeSale]);
-          if (error) throw error;
-        } 
-        else if (item.table === 'purchases') {
-          // Push Purchase
-          const snakePurchase = {
-            id: item.payload.id,
-            business_id: item.payload.businessId,
-            total: item.payload.total,
-            timestamp: item.payload.timestamp,
-            items: item.payload.items
-          };
-          const { error } = await supabase.from('purchases').insert([snakePurchase]);
-          if (error) throw error;
-        } 
-        else if (item.table === 'products') {
-          const snakeProduct = {
-            id: item.payload.id,
-            business_id: item.payload.businessId,
-            name: item.payload.name,
-            price: item.payload.price,
-            cost_price: item.payload.costPrice || 0,
-            quantity: item.payload.quantity,
-            low_stock_threshold: item.payload.lowStockThreshold || 5,
-            updated_at: item.payload.updatedAt,
-            category: item.payload.category || 'General',
-            barcode: item.payload.barcode || ''
-          };
+        const payloadBatch = pendingBatch.map(evt => ({
+          event_id: evt.event_id,
+          business_id: session.user.id,
+          staff_id: evt.staff_id || 'UNKNOWN',
+          event_type: evt.event_type,
+          payload: evt.payload,
+          client_timestamp: evt.client_timestamp,
+          hash: evt.hash
+        }));
 
-          if (item.action === 'INSERT') {
-            const { error } = await supabase.from('products').insert([snakeProduct]);
-            if (error) throw error;
-          } else if (item.action === 'UPDATE') {
-            const { error } = await supabase.from('products')
-              .update(snakeProduct)
-              .eq('id', item.payload.id);
-            if (error) throw error;
-          } else if (item.action === 'STOCK_DELTA') {
-            // Use Supabase RPC to prevent race conditions across multiple devices
-            const { error } = await supabase.rpc('apply_stock_delta', {
-              p_product_id: item.payload.id,
-              p_business_id: item.payload.businessId,
-              p_quantity_change: item.payload.delta
-            });
-            if (error) throw error;
-          }
-        }
-        else if (item.table === 'expenses') {
-          const snakeExpense = {
-            id: item.payload.id,
-            business_id: item.payload.businessId,
-            title: item.payload.title,
-            amount: item.payload.amount,
-            category: item.payload.category,
-            timestamp: item.payload.timestamp,
-            is_recurring: !!item.payload.isRecurring
-          };
-          const { error } = await supabase.from('expenses').upsert([snakeExpense]);
-          if (error) throw error;
-        }
-        else if (item.table === 'recurring_expenses') {
-          const snakeRecurring = {
-            id: item.payload.id,
-            business_id: item.payload.businessId,
-            title: item.payload.title,
-            amount: item.payload.amount,
-            category: item.payload.category,
-            frequency: item.payload.frequency,
-            next_run: item.payload.nextRun,
-            is_active: item.payload.isActive
-          };
-          const { error } = await supabase.from('recurring_expenses').upsert([snakeRecurring]);
-          if (error) throw error;
-        }
-        else if (item.table === 'businesses') {
-          const snakeBiz = {
-            id: item.payload.id,
-            name: item.payload.name,
-            code: item.payload.code,
-            pin: item.payload.pin,
-            package_id: item.payload.packageId,
-            expiry_date: item.payload.expiryDate,
-            status: item.payload.status
-          };
-          const { error } = await supabase.from('businesses').upsert([snakeBiz]);
-          if (error) throw error;
-        }
-        else if (item.table === 'staff') {
-          const snakeStaff = {
-            id: item.payload.id,
-            business_id: item.payload.businessId,
-            code: item.payload.code,
-            pin: item.payload.pin,
-            first_name: item.payload.firstName,
-            last_name: item.payload.lastName,
-            phone_number: item.payload.phoneNumber,
-            id_number: item.payload.idNumber,
-            status: item.payload.status
-          };
-          const { error } = await supabase.from('staff').upsert([snakeStaff]);
-          if (error) throw error;
-        }
-        else if (item.action === 'VERIFY_PAYMENT') {
-          const { error } = await supabase.from('payment_requests').insert([{
-            business_id: item.payload.businessId || (await supabase.auth.getSession()).data.session?.user.id,
-            mpesa_code: item.payload.mpesaCode,
-            payment_type: item.payload.type,
-            timestamp: item.timestamp
-          }]);
-          if (error) throw error;
-        }
-        
-        // Remove from local queue on explicit success
-        await db.sync_queue.delete(item.id);
+        // Phase 3: ACK Sync Protocol. Push the events.
+        const { error } = await supabase
+          .from('pos_events')
+          .upsert(payloadBatch, { ignoreDuplicates: true, onConflict: 'event_id' });
+
+        if (error) throw error;
+
+        // ACKNOWLEDGED. Mark them synced locally.
+        const eventIds = pendingBatch.map(e => e.event_id);
+        await db.pos_events.where('event_id').anyOf(eventIds).modify({ sync_status: 'synced' });
+
       } catch (err: unknown) {
-        console.error('Failed to sync item:', item, err);
+        console.error('Event Push failure:', err);
         const errorMessage = err instanceof Error ? err.message : String(err);
-        
-        const newErrorCount = (item.errorCount || 0) + 1;
-        await db.sync_queue.update(item.id, {
-          errorCount: newErrorCount,
-          lastError: errorMessage,
-          status: newErrorCount >= 3 ? 'failed' : 'pending'
-        });
-        
         setSyncError(errorMessage);
-        // Continue to next item so the queue doesn't fully halt
         continue; 
       }
     }
+
+    await new Promise(resolve => setTimeout(resolve, 50));
   };
 
   const pullRemoteChanges = async () => {
     try {
-      const bizId = localStorage.getItem('biz_id');
-      if (!bizId) return;
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
 
+      const bizId = session.user.id;
       const setting = await db.settings.get('last_synced');
       const lastSynced = (setting?.value as number) || 0;
 
-      // Pull new or updated products
-      const { data: updatedProducts, error: prodErr } = await supabase
-        .from('products')
+      // Phase 3: Cursor Pagination Pull (High Performance / Free Tier Safe)
+      const { data: incomingEvents, error: fetchErr } = await supabase
+        .from('pos_events')
         .select('*')
-        .gt('updated_at', lastSynced);
+        .eq('business_id', bizId)
+        .gt('server_timestamp', lastSynced)
+        .order('server_timestamp', { ascending: true })
+        .limit(1000); // Batched fetch to prevent memory freeze
       
-      if (prodErr) throw prodErr;
-
-      if (updatedProducts && updatedProducts.length > 0) {
-        const mappedProducts = updatedProducts.map(p => ({
-          id: p.id,
-          businessId: p.business_id,
-          name: p.name,
-          price: p.price,
-          costPrice: p.cost_price,
-          quantity: p.quantity,
-          lowStockThreshold: p.low_stock_threshold,
-          updatedAt: p.updated_at,
-          category: p.category,
-          barcode: p.barcode
+      if (!fetchErr && incomingEvents && incomingEvents.length > 0) {
+        // Transform and insert to local immutable Dexie ledger
+        const mappedEvents = incomingEvents.map(p => ({
+            event_id: p.event_id,
+            business_id: p.business_id,
+            staff_id: p.staff_id,
+            event_type: p.event_type,
+            payload: p.payload,
+            client_timestamp: p.client_timestamp,
+            server_timestamp: p.server_timestamp,
+            hash: p.hash,
+            sync_status: 'synced' as const
         }));
-        await db.products.bulkPut(mappedProducts);
-      }
 
-      // Pull new sales
-      const { data: newSales, error: salesErr } = await supabase
-        .from('sales')
-        .select('*')
-        .gt('timestamp', lastSynced);
-        
-      if (salesErr) throw salesErr;
-      
-      if (newSales && newSales.length > 0) {
-        const mappedSales = newSales.map(s => ({
-          id: s.id,
-          businessId: s.business_id,
-          receiptId: s.receipt_id,
-          total: s.total,
-          totalProfit: s.total_profit,
-          timestamp: s.timestamp,
-          items: s.items,
-          taxRate: s.tax_rate,
-          taxAmount: s.tax_amount,
-          paymentMethod: s.payment_method
-        }));
-        await db.sales.bulkPut(mappedSales);
-      }
+        await db.pos_events.bulkPut(mappedEvents);
 
-      // Pull new expenses
-      try {
-        const { data: newExpenses, error: expErr } = await supabase
-          .from('expenses')
-          .select('*')
-          .gt('timestamp', lastSynced);
-        
-        if (expErr) {
-          if (expErr.code === 'PGRST205') {
-            console.warn('Backend Pull Skip: "expenses" table not found in Supabase.');
-          } else {
-            throw expErr;
-          }
-        } else if (newExpenses && newExpenses.length > 0) {
-          const mappedExpenses = newExpenses.map(e => ({
-            id: e.id,
-            businessId: e.business_id,
-            title: e.title,
-            amount: e.amount,
-            category: e.category,
-            timestamp: e.timestamp,
-            isRecurring: e.is_recurring
-          }));
-          await db.expenses.bulkPut(mappedExpenses);
+        // Send new events through the POSReducer to update React Materialized Snapshots instantly
+        // Example: updating Stock Snapshot incrementally based on downloaded events
+        let stockSnapshot = await db.snapshots.get(`stock_${bizId}`);
+        if (!stockSnapshot) {
+             stockSnapshot = await POSReducer.rebuildSnapshot(bizId, 'stock');
+        } else {
+             incomingEvents.forEach(evt => {
+                 stockSnapshot = POSReducer.applyEvent(stockSnapshot!, mappedEvents.find(e => e.event_id === evt.event_id)!);
+             });
+             await db.snapshots.put(stockSnapshot);
         }
-      } catch (err) {
-        console.warn('Silent Pull Error (expenses):', err);
+
+        // Update cursor
+        const maxServerTime = Math.max(...incomingEvents.map(e => e.server_timestamp));
+        await db.settings.put({ key: 'last_synced', value: maxServerTime });
       }
-
-      // Pull recurring expense templates
-      try {
-        const { data: recurringData, error: recErr } = await supabase
-          .from('recurring_expenses')
-          .select('*');
-        
-        if (recErr) {
-          if (recErr.code === 'PGRST205') {
-            console.warn('Backend Pull Skip: "recurring_expenses" table not found in Supabase.');
-          } else {
-            throw recErr;
-          }
-        } else if (recurringData && recurringData.length > 0) {
-          const mappedRecurring = recurringData.map(r => ({
-            id: r.id,
-            businessId: r.business_id,
-            title: r.title,
-            amount: r.amount,
-            category: r.category,
-            frequency: r.frequency,
-            nextRun: r.next_run,
-            isActive: r.is_active
-          }));
-          await db.recurring_expenses.bulkPut(mappedRecurring);
-        }
-      } catch (err) {
-        console.warn('Silent Pull Error (recurring_expenses):', err);
-      }
-
-      // Pull staff for this business
-      try {
-        const { data: staffData, error: staffErr } = await supabase
-          .from('staff')
-          .select('*')
-          .eq('business_id', bizId);
-        
-        if (staffErr) {
-          if (staffErr.code === 'PGRST205') {
-            console.warn('Backend Pull Skip: "staff" table not found in Supabase.');
-          } else {
-            throw staffErr;
-          }
-        } else if (staffData && staffData.length > 0) {
-          const mappedStaff = staffData.map(s => ({
-            id: s.id,
-            businessId: s.business_id,
-            code: s.code,
-            pin: s.pin,
-            firstName: s.first_name,
-            lastName: s.last_name,
-            phoneNumber: s.phone_number,
-            idNumber: s.id_number,
-            status: s.status
-          }));
-          await db.staff.bulkPut(mappedStaff);
-        }
-      } catch (err) {
-        console.warn('Silent Pull Error (staff):', err);
-      }
-
-      // Update sync timestamp using server time (prevents local clock tampering sync issues)
-      const { data: serverTimeData, error: timeErr } = await supabase.rpc('get_server_timestamp');
-      if (timeErr) throw timeErr;
-      
-      const serverTime = serverTimeData as number;
-      await db.settings.put({ key: 'last_synced', value: serverTime });
-
-      if (bizId) {
-        const { data: businessData, error: bizErr } = await supabase
-          .from('businesses')
-          .select('expiry_date, status, package_id')
-          .eq('id', bizId)
-          .maybeSingle();
-          
-        if (bizErr) throw bizErr;
-
-        if (businessData) {
-          await db.settings.put({ key: 'expiry_date', value: businessData.expiry_date });
-          await db.settings.put({ key: 'is_deposit_paid', value: businessData.status === 'active' });
-          await db.businesses.update(bizId, { 
-             expiryDate: businessData.expiry_date, 
-             status: businessData.status,
-             packageId: businessData.package_id
-          });
-        }
-      }
-
-      // Calculate the offset to harden the local subscription checks
-      const timeOffset = serverTime - Date.now();
-      await db.settings.put({ key: 'time_offset', value: timeOffset });
 
     } catch (err: unknown) {
-      console.error('Failed to pull updates:', err);
-      if (err instanceof Error) setSyncError(err.message);
+      console.error('Pull failed:', err);
     }
   };
 
@@ -371,60 +140,11 @@ export function useSync() {
       isSyncingRef.current = false;
       setIsSyncing(false);
     }
-  }, []); // Stable identity
+  }, []); 
 
-  // Auto-sync when coming back online
   useEffect(() => {
-    if (isOnline) {
-      syncAll();
-    }
+    if (isOnline) syncAll();
   }, [isOnline, syncAll]);
-
-  // Periodic background sync (every 5 minutes)
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (navigator.onLine) {
-        syncAll();
-      }
-    }, 5 * 60 * 1000);
-    return () => clearInterval(interval);
-  }, [syncAll]);
-
-  // Immediate push when sync_queue items are added
-  const pendingCount = useLiveQuery(() => db.sync_queue.count()) || 0;
-  const prevPendingCount = useRef(pendingCount);
-
-  useEffect(() => {
-    if (pendingCount > prevPendingCount.current) {
-      // Something was added, try to push immediately
-      if (navigator.onLine) {
-        syncAll();
-      }
-    }
-    prevPendingCount.current = pendingCount;
-  }, [pendingCount, syncAll]);
-
-  // Special "Activation" check (High frequency pull when potentially recently paid)
-  useEffect(() => {
-    let interval: ReturnType<typeof setInterval>;
-    const checkPaymentAndSetup = async () => {
-      const isDepositPaid = (await db.settings.get('is_deposit_paid'))?.value === true;
-      const expiryDate = (await db.settings.get('expiry_date'))?.value as number;
-      const soonToExpire = expiryDate - Date.now() < 24 * 60 * 60 * 1000;
-      
-      if ((!isDepositPaid || soonToExpire)) {
-        // Pull updates every minute if we are awaiting activation or about to expire
-        interval = setInterval(() => {
-          if (navigator.onLine) syncAll();
-        }, 60000);
-      }
-    };
-    
-    checkPaymentAndSetup();
-    return () => {
-       if (interval) clearInterval(interval);
-    };
-  }, [syncAll]);
 
   return {
     isOnline,
@@ -435,7 +155,7 @@ export function useSync() {
 }
 
 export function useSyncStatus() {
-  const pendingCount = useLiveQuery(() => db.sync_queue.count()) || 0;
+  const pendingCount = useLiveQuery(() => db.pos_events.where('sync_status').equals('pending').count()) || 0;
   const { isOnline, isSyncing } = useSync();
   return { pendingCount, isOnline, isSyncing };
 }

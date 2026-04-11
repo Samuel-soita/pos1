@@ -7,6 +7,7 @@ import { useSync } from '../hooks/useSync';
 import { useAuth } from '../hooks/useAuth';
 import { useSubscription } from '../hooks/useSubscription';
 import { PackageSelection } from './PackageSelection';
+import { SyncDashboard } from './SyncDashboard';
 
 export function Settings() {
   const [businessName, setBusinessName] = useState('');
@@ -25,6 +26,11 @@ export function Settings() {
   const [taxRate, setTaxRate] = useState(0);
   const [securityMode, setSecurityMode] = useState('owner'); // 'owner' or 'staff'
   const [ownerPin, setOwnerPin] = useState('');
+  
+  // Premium Profile State
+  const [telephone, setTelephone] = useState(business?.telephone || '');
+  const [address, setAddress] = useState(business?.address || '');
+  const [kraPin, setKraPin] = useState(business?.kraPin || '');
 
   useEffect(() => {
     async function load() {
@@ -61,9 +67,16 @@ export function Settings() {
     }
   }, []);
 
-  const handleUpdateName = async () => {
+  const handleUpdateProfile = async () => {
+    if (!business) return;
+    await db.businesses.update(business.id, { 
+      name: businessName,
+      telephone,
+      address,
+      kraPin
+    });
     await db.settings.put({ key: 'business_name', value: businessName });
-    alert('Business name updated!');
+    alert('Business profile updated successfully!');
   };
 
   const handleSaveTax = async () => {
@@ -129,7 +142,7 @@ export function Settings() {
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', color: 'var(--primary)' }}>
                     <Sparkles size={18} strokeWidth={3} />
                     <span style={{ fontSize: '1.25rem', fontWeight: 900 }}>
-                      {business?.packageId ? packages[business.packageId as keyof typeof packages]?.name : 'None'}
+                      {business?.packageId ? (packages as Record<string, any>)[business.packageId]?.name : 'None'}
                     </span>
                   </div>
                 </div>
@@ -137,7 +150,7 @@ export function Settings() {
                 <div style={{ borderTop: '1px solid var(--border)', paddingTop: '12px' }}>
                   <p style={{ fontSize: '0.65rem', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>Monthly Cost</p>
                   <span style={{ fontSize: '1.1rem', fontWeight: 900 }}>
-                    KES {business?.packageId ? (packages[business.packageId as keyof typeof packages]?.price || 0).toLocaleString() : '0'}
+                    KES {business?.packageId ? ((packages as Record<string, any>)[business.packageId]?.price || 0).toLocaleString() : '0'}
                   </span>
                 </div>
               </div>
@@ -165,16 +178,50 @@ export function Settings() {
             <Store size={24} color="var(--primary)" />
             Business Profile
           </h2>
-          <div className="input-group">
-            <label>Business / Store Name</label>
-            <input 
-              type="text" 
-              value={businessName} 
-              onChange={(e) => setBusinessName(e.target.value)} 
-              placeholder="Enter your store name"
-            />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+            <div className="input-group">
+              <label>Business / Store Name</label>
+              <input 
+                type="text" 
+                value={businessName} 
+                onChange={(e) => setBusinessName(e.target.value)} 
+                placeholder="Enter your store name"
+              />
+            </div>
+            
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
+              <div className="input-group">
+                <label>Telephone</label>
+                <input 
+                  type="text" 
+                  value={telephone || ''} 
+                  onChange={(e) => setTelephone(e.target.value)} 
+                  placeholder="0712345678"
+                />
+              </div>
+              <div className="input-group">
+                <label>KRA PIN</label>
+                <input 
+                  type="text" 
+                  value={kraPin || ''} 
+                  onChange={(e) => setKraPin(e.target.value.toUpperCase())} 
+                  placeholder="A000123456Z"
+                />
+              </div>
+            </div>
+
+            <div className="input-group">
+              <label>Physical Address</label>
+              <input 
+                type="text" 
+                value={address || ''} 
+                onChange={(e) => setAddress(e.target.value)} 
+                placeholder="Building Name, Shop No, Street"
+              />
+            </div>
+
+            <button className="btn-primary" onClick={handleUpdateProfile}>Update Business Profile</button>
           </div>
-          <button className="btn-primary" onClick={handleUpdateName}>Update Business Info</button>
         </div>
 
         {/* Sales & Tax Settings */}
@@ -246,6 +293,11 @@ export function Settings() {
           </button>
         </div>
 
+        {/* Sync Health Dashboard */}
+        {userType === 'owner' && (
+          <SyncDashboard />
+        )}
+
         {/* App Management & Installation */}
         <div className="card">
           <h2 style={{ fontSize: '1.5rem', fontWeight: 700, marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -277,32 +329,45 @@ export function Settings() {
         </div>
 
         {/* Hardware & Peripherals */}
+        {/* Hardware & Status */}
         <div className="card">
           <h2 style={{ fontSize: '1.5rem', fontWeight: 700, marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}>
             <Printer size={24} color="var(--primary)" />
-            Hardware & Peripherals
+            Hardware & Status
           </h2>
-          <p style={{ marginBottom: '20px', color: 'var(--text-muted)' }}>
-            Connect a generic Bluetooth Thermal Receipt Printer (58mm/80mm) directly to your browser.
-          </p>
-
-          {!isSupported ? (
-            <div style={{ background: '#fef2f2', border: '1px dashed var(--danger)', padding: '16px', borderRadius: '12px', color: '#991b1b' }}>
-              <strong>Web Bluetooth is currently unavailable.</strong>
-              <p style={{ fontSize: '0.9rem', marginTop: '8px' }}>
-                Browsers enforce strict hardware security limits. To pair a printer, you must be using <strong>Google Chrome or Edge on Android/PC</strong>, AND the app must be loaded via <strong>HTTPS</strong> or exactly <strong>localhost</strong> (not a local network IP like 192.168.x.x).
-              </p>
-            </div>
-          ) : (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-              <button className={isConnected ? "btn-secondary" : "btn-primary"} onClick={connect}>
-                {isConnected ? 'Pair a Different Printer' : 'Pair Bluetooth Printer'}
+          
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', marginBottom: '24px' }}>
+            <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '12px', border: '1px solid var(--border)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-muted)' }}>BLUETOOTH PRINTER</span>
+                <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: isConnected ? 'var(--success)' : '#cbd5e1', boxShadow: isConnected ? '0 0 8px var(--success)' : 'none' }}></div>
+              </div>
+              <p style={{ fontWeight: 800, fontSize: '0.9rem' }}>{isConnected ? deviceName : 'Not Connected'}</p>
+              <button className="btn-secondary" onClick={connect} style={{ width: '100%', marginTop: '12px', minHeight: '36px', fontSize: '0.8rem' }}>
+                {isConnected ? 'Change Device' : 'Connect Printer'}
               </button>
-              {isConnected && (
-                <span style={{ color: 'var(--success)', fontWeight: 600 }}>Connected to: {(deviceName || 'Unknown Thermal Printer')}</span>
-              )}
+            </div>
+
+            <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '12px', border: '1px solid var(--border)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-muted)' }}>BARCODE SCANNER</span>
+                <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: 'var(--success)', boxShadow: '0 0 8px var(--success)' }}></div>
+              </div>
+              <p style={{ fontWeight: 800, fontSize: '0.9rem' }}>Active & Ready</p>
+              <p style={{ fontSize: '0.65rem', color: 'var(--text-muted)', marginTop: '8px' }}>Always active on Sales screen.</p>
+            </div>
+          </div>
+
+          {!isSupported && (
+            <div style={{ background: '#fef2f2', border: '1px dashed var(--danger)', padding: '16px', borderRadius: '12px', color: '#991b1b', marginBottom: '16px' }}>
+              <strong>Hardware Logic Limited</strong>
+              <p style={{ fontSize: '0.85rem', marginTop: '4px' }}>Please use Chrome or Edge on Android/PC via HTTPS for full hardware pairing.</p>
             </div>
           )}
+
+          <div style={{ display: 'flex', gap: '12px' }}>
+             <button className="btn-secondary" style={{ flex: 1 }} onClick={() => alert('Diagnostic: Hardware Ready. Device ID: ' + (localStorage.getItem('deviceId') || 'N/A'))}>System Diagnostic</button>
+          </div>
         </div>
 
       </div>

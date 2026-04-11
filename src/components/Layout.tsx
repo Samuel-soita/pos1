@@ -1,11 +1,13 @@
 import { useState, useEffect, type ReactNode } from 'react';
-import { ShoppingCart, Package, BarChart3, Lock, X, Cloud, CloudOff, RefreshCw, Sparkles, Receipt } from 'lucide-react';
+import { Lock, X, Sparkles, Wallet, Home, LogOut } from 'lucide-react';
 import { usePWAUpdate } from '../hooks/usePWAUpdate';
 import { useSync, useSyncStatus } from '../hooks/useSync';
 import { useSubscription } from '../hooks/useSubscription';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/db';
 import { useAuth } from '../hooks/useAuth';
+import { useCashControl } from '../hooks/useCashControl';
+import { useShifts } from '../hooks/useShifts';
 
 interface LayoutProps {
   children: ReactNode;
@@ -16,60 +18,68 @@ interface LayoutProps {
 const RESTRICTED_TABS = ['dashboard', 'inventory', 'reports', 'settings', 'staff'];
 
 export function Layout({ children, activeTab, setActiveTab }: LayoutProps) {
-  // useSync is called to ensure background syncing is initialized
   useSync();
-  const { status, daysLeft, isTrial } = useSubscription();
+  const { status: subStatus, daysLeft, message } = useSubscription();
   const { userType, logout, business } = useAuth();
 
   const [isManagerUnlocked, setIsManagerUnlocked] = useState(false);
   const [showPinModal, setShowPinModal] = useState(false);
+  const [showClosingModal, setShowClosingModal] = useState(false);
   const [pinInput, setPinInput] = useState('');
-  const [attemptedTab, setAttemptedTab] = useState<string | null>(null);
+
+  const { isRegisterOpen, closeRegister, getExpectedCash } = useCashControl();
+  const { endShift } = useShifts();
 
   const ownerPin = useLiveQuery(async () => {
     const setting = await db.settings.get('owner_pin');
     return (setting?.value as string) || '1234';
   }, []) || '1234';
 
-  // Force cashiers out of restricted tabs on boot
+  const securityMode = useLiveQuery(async () => {
+    const setting = await db.settings.get('security_mode');
+    return (setting?.value as string) || 'owner';
+  }, []) || 'owner';
+
+  // Force cashiers or restricted devices out of restricted tabs on boot
   useEffect(() => {
-    if (userType === 'staff' && RESTRICTED_TABS.includes(activeTab)) {
+    const isRestricted = userType === 'staff' || securityMode === 'staff' || subStatus === 'suspended';
+    if (isRestricted && !isManagerUnlocked && RESTRICTED_TABS.includes(activeTab)) {
       setActiveTab('sales');
     }
-  }, [userType, activeTab, setActiveTab]);
-
-  const navItems = [
-    { id: 'dashboard', label: 'Dashboard', icon: <BarChart3 size={20} /> },
-    { id: 'sales', label: 'Sales', icon: <ShoppingCart size={20} /> },
-    { id: 'inventory', label: 'My Store', icon: <Package size={20} /> },
-    { id: 'expenses', label: 'Expenses', icon: <Receipt size={20} /> },
-  ];
-
-  const handleTabClick = (tabId: string) => {
-    if (userType === 'staff' && RESTRICTED_TABS.includes(tabId) && !isManagerUnlocked) {
-      setAttemptedTab(tabId);
-      setShowPinModal(true);
-      return;
-    }
-    setActiveTab(tabId);
-  };
+  }, [userType, securityMode, subStatus, isManagerUnlocked, activeTab, setActiveTab]);
 
   const handlePinSubmit = () => {
     if (pinInput === ownerPin) {
       setIsManagerUnlocked(true);
       setShowPinModal(false);
       setPinInput('');
-      if (attemptedTab) {
-        setActiveTab(attemptedTab);
-      }
     } else {
       alert('Incorrect PIN!');
       setPinInput('');
     }
   };
 
+  const handleLogout = async () => {
+    if (userType === 'staff') {
+      await endShift();
+    }
+    logout();
+  };
+
   return (
-    <div style={{ display: 'flex', minHeight: '100vh' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', position: 'relative' }}>
+      {/* Vault Blur Layer - Only active during security/locked states */}
+      {(showPinModal || subStatus === 'suspended') && (
+        <div 
+          className="vault-blur" 
+          style={{ 
+            position: 'fixed', 
+            inset: 0, 
+            zIndex: 9000,
+            pointerEvents: 'none'
+          }} 
+        />
+      )}
 
       {/* Pin Authorization Modal */}
       {showPinModal && (
@@ -100,47 +110,26 @@ export function Layout({ children, activeTab, setActiveTab }: LayoutProps) {
         </div>
       )}
 
-      {/* Sidebar */}
-      <aside className="desktop-sidebar">
-        <div style={{ fontSize: '1.5rem', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <ShoppingCart size={32} color="var(--primary)" />
-          <span className="brand-shimmer">SMUTA PAY</span>
-        </div>
+      {/* Closing Register Modal */}
+      {showClosingModal && (
+        <ClosingFloatModal 
+          onClose={() => setShowClosingModal(false)} 
+          onConfirm={async (actual) => {
+            await closeRegister(actual);
+            setShowClosingModal(false);
+          }}
+          getExpected={getExpectedCash}
+        />
+      )}
 
-        <nav style={{ display: 'flex', flexDirection: 'column', gap: '8px', flex: 1 }}>
-          {navItems.map(item => {
-            const isLocked = userType === 'staff' && RESTRICTED_TABS.includes(item.id);
-            return (
-              <button
-                key={item.id}
-                onClick={() => handleTabClick(item.id)}
-                className={activeTab === item.id ? 'btn-primary' : 'btn-secondary'}
-                style={{ width: '100%', justifyContent: 'space-between', opacity: isLocked ? 0.6 : 1 }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  {item.icon}
-                  {item.label}
-                </div>
-                {isLocked && <Lock size={14} color="var(--text-muted)" />}
-              </button>
-            );
-          })}
-        </nav>
-
-        <button 
-          onClick={logout}
-          className="btn-secondary"
-          style={{ width: '100%', marginTop: 'auto', border: '1px solid var(--danger)', color: 'var(--danger)' }}
-        >
-          Logout
-        </button>
-      </aside>
 
       {/* Main Content */}
       <main style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
-        {status !== 'active' && (
+        {subStatus !== 'active' && subStatus !== 'trial' && (
           <div style={{
-            background: status === 'locked' ? 'linear-gradient(90deg, #ef4444 0%, #b91c1c 100%)' : 'linear-gradient(90deg, #f59e0b 0%, #d97706 100%)',
+            background: subStatus === 'suspended' ? 'linear-gradient(90deg, #ef4444 0%, #b91c1c 100%)' : 
+                        subStatus === 'grace' ? 'linear-gradient(90deg, #f59e0b 0%, #d97706 100%)' :
+                        'linear-gradient(90deg, var(--primary) 0%, #1d4ed8 100%)',
             color: 'white',
             padding: '12px 32px',
             fontSize: '0.9rem',
@@ -153,15 +142,13 @@ export function Layout({ children, activeTab, setActiveTab }: LayoutProps) {
             boxShadow: '0 4px 6px -1px rgba(0,0,0,0.1)',
             zIndex: 100
           }}>
-            <Lock size={18} />
-            <span style={{ letterSpacing: '0.5px' }}>
-              {status === 'locked'
-                ? 'ACCOUNT LOCKED • VIEW-ONLY MODE • PAY TO UNLOCK'
-                : `GRACE PERIOD • ${daysLeft} DAYS REMAINING TO AVOID LOCK`}
+            {subStatus === 'suspended' ? <Lock size={18} /> : <Sparkles size={18} />}
+            <span style={{ letterSpacing: '0.5px', textTransform: 'uppercase' }}>
+              {message}
             </span>
           </div>
         )}
-        {status === 'active' && isTrial && daysLeft <= 5 && (
+        {(subStatus === 'trial' || subStatus === 'active') && daysLeft <= 5 && (
           <div style={{
             background: 'linear-gradient(90deg, var(--primary) 0%, #1d4ed8 100%)',
             color: 'white',
@@ -176,7 +163,7 @@ export function Layout({ children, activeTab, setActiveTab }: LayoutProps) {
             letterSpacing: '0.5px'
           }}>
             <Sparkles size={16} />
-            <span>TRIAL ACTIVE • {daysLeft} DAYS REMAINING • {business?.packageId?.toUpperCase()} PLAN</span>
+            <span>{message} • {business?.packageId?.toUpperCase()} PLAN</span>
           </div>
         )}
         <header style={{
@@ -185,20 +172,78 @@ export function Layout({ children, activeTab, setActiveTab }: LayoutProps) {
           borderBottom: '1px solid var(--border)',
           display: 'flex',
           justifyContent: 'space-between',
-          alignItems: 'center'
+          alignItems: 'center',
+          position: 'sticky',
+          top: 0,
+          zIndex: 100
         }}>
-          <div style={{ display: 'flex', flexDirection: 'column' }}>
-            <h2 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 600 }}>
-              {activeTab === 'inventory' ? 'My Store' : 
-               activeTab === 'reports' ? 'Analytics' :
-               activeTab.charAt(0).toUpperCase() + activeTab.slice(1)}
-            </h2>
-            <div className="welcome-greeting" style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontWeight: 600 }}>
-              {business?.name || 'SMUTA PAY'} Dashboard
+          <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+            {/* Logo/Home Button */}
+            <button 
+              onClick={() => setActiveTab('dashboard')}
+              style={{ background: 'transparent', padding: 0, display: 'flex', alignItems: 'center', gap: '8px' }}
+            >
+              <div style={{ background: 'var(--primary)', padding: '8px', borderRadius: '10px', color: 'white' }}>
+                <Home size={20} />
+              </div>
+              <span style={{ fontWeight: 800, fontSize: '1.25rem', color: 'var(--primary)', letterSpacing: '-0.5px' }} className="desktop-only">SMUTA PAY</span>
+            </button>
+            
+            <div style={{ width: '1px', height: '24px', background: 'var(--border)', margin: '0 8px' }} className="desktop-only" />
+
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <h2 style={{ margin: 0, fontSize: '1rem', fontWeight: 700 }}>
+                {activeTab === 'inventory' ? 'My Store' : 
+                 activeTab === 'reports' ? 'Analytics' :
+                 activeTab.charAt(0).toUpperCase() + activeTab.slice(1)}
+              </h2>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.7rem', fontWeight: 600 }}>
+                <span style={{ color: 'var(--text-muted)' }}>{business?.name || 'Main'}</span>
+                <span style={{ color: 'var(--primary)', textTransform: 'uppercase' }}>{userType === 'owner' ? 'Owner' : 'Staff'}</span>
+              </div>
             </div>
           </div>
 
-          <div style={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+            {isRegisterOpen && (
+              <button 
+                onClick={() => setShowClosingModal(true)}
+                className="desktop-only"
+                style={{ 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  gap: '6px', 
+                  background: '#fef2f2', 
+                  color: '#991b1b', 
+                  padding: '6px 12px', 
+                  borderRadius: '10px', 
+                  fontSize: '0.75rem', 
+                  fontWeight: 800,
+                  border: '1px solid #fee2e2'
+                }}
+              >
+                <Wallet size={14} /> Close Register
+              </button>
+            )}
+            
+            <button 
+              onClick={() => setIsManagerUnlocked(false)}
+              className="btn-secondary"
+              title="Lock Console"
+              style={{ width: '40px', height: '40px', padding: 0, display: isManagerUnlocked ? 'flex' : 'none', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--danger)', color: 'var(--danger)' }}
+            >
+              <Lock size={18} />
+            </button>
+
+            <button 
+              onClick={handleLogout}
+              className="btn-secondary"
+              title="Logout"
+              style={{ width: '40px', height: '40px', padding: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+            >
+              <LogOut size={18} />
+            </button>
+            
             <UpdateStatus />
             <SyncStatus />
           </div>
@@ -209,25 +254,6 @@ export function Layout({ children, activeTab, setActiveTab }: LayoutProps) {
         </div>
       </main>
 
-      {/* Mobile Bottom Navigation */}
-      <nav className="mobile-bottom-nav">
-        {navItems.map(item => {
-          const isLocked = userType === 'staff' && !isManagerUnlocked && RESTRICTED_TABS.includes(item.id);
-          return (
-            <button
-              key={item.id}
-              onClick={() => handleTabClick(item.id)}
-              className={activeTab === item.id ? 'btn-primary' : 'btn-secondary'}
-            >
-              <div style={{ position: 'relative' }}>
-                {item.icon}
-                {isLocked && <Lock size={10} style={{ position: 'absolute', top: -4, right: -8, color: 'var(--danger)' }} />}
-              </div>
-              <span style={{ fontSize: '0.7rem' }}>{item.label}</span>
-            </button>
-          )
-        })}
-      </nav>
     </div>
   );
 }
@@ -264,27 +290,97 @@ function SyncStatus() {
 
   if (isSyncing) {
     return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--primary)', fontWeight: 600, fontSize: '0.85rem' }}>
-        <RefreshCw size={18} className="spin-animation" />
-        <span className="desktop-only">Syncing...</span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--warning)', fontWeight: 700, fontSize: '0.85rem' }}>
+        <span style={{ fontSize: '1.2rem', animation: 'spin 2s linear infinite', display: 'inline-block' }}>🟡</span>
+        <span className="desktop-only">Syncing Changes...</span>
       </div>
     );
   }
 
   if (!isOnline) {
     return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--warning)', fontWeight: 600, fontSize: '0.85rem' }}>
-        <CloudOff size={18} />
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--danger)', fontWeight: 700, fontSize: '0.85rem' }}>
+        <span style={{ fontSize: '1.2rem' }}>🔴</span>
         <span>Offline {pendingCount > 0 && `(${pendingCount} pending)`}</span>
       </div>
     );
   }
 
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--success)', fontWeight: 600, fontSize: '0.85rem' }}>
-      <Cloud size={18} />
-      <span className="desktop-only">{pendingCount > 0 ? `${pendingCount} Items Pending` : 'Synced'}</span>
+    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--success)', fontWeight: 700, fontSize: '0.85rem' }}>
+      <span style={{ fontSize: '1.2rem' }}>🟢</span>
+      <span className="desktop-only">{pendingCount > 0 ? `${pendingCount} Items Pending` : 'All Synced'}</span>
       {pendingCount > 0 && <span className="mobile-only">({pendingCount})</span>}
     </div>
   );
 }
+
+function ClosingFloatModal({ onClose, onConfirm, getExpected }: { onClose: () => void, onConfirm: (actual: number) => void, getExpected: () => Promise<number> }) {
+  const [actual, setActual] = useState('');
+  const [expected, setExpected] = useState<number | null>(null);
+  const [isCalculating, setIsCalculating] = useState(true);
+
+  useEffect(() => {
+    getExpected().then(val => {
+      setExpected(val);
+      setIsCalculating(false);
+    });
+  }, [getExpected]);
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!actual) return;
+    onConfirm(parseFloat(actual));
+  };
+
+  const diff = actual ? parseFloat(actual) - (expected || 0) : 0;
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
+      <div className="card modal-responsive" style={{ padding: '32px', maxWidth: '400px' }}>
+        <h2 style={{ fontSize: '1.5rem', fontWeight: 900, marginBottom: '24px', textAlign: 'center' }}>Close Register</h2>
+        
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '24px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px', background: '#f8fafc', borderRadius: '12px' }}>
+            <span>Expected Cash:</span>
+            <span style={{ fontWeight: 800 }}>{isCalculating ? '...' : `KES ${expected?.toLocaleString()}`}</span>
+          </div>
+          
+          <div className="input-group">
+            <label>Actual Cash in Drawer</label>
+            <input 
+              type="number" 
+              value={actual} 
+              onChange={e => setActual(e.target.value)} 
+              placeholder="0" 
+              autoFocus 
+              required 
+              style={{ fontSize: '1.25rem', height: '56px', textAlign: 'center', fontWeight: 800 }}
+            />
+          </div>
+
+          {!isCalculating && actual && (
+            <div style={{ 
+              padding: '12px', 
+              borderRadius: '12px', 
+              textAlign: 'center', 
+              background: diff === 0 ? '#dcfce7' : '#fef2f2',
+              color: diff === 0 ? '#166534' : '#991b1b',
+              fontWeight: 800
+            }}>
+              {diff === 0 ? '✓ Perfect Balance' : `Discrepancy: KES ${diff.toLocaleString()}`}
+            </div>
+          )}
+        </div>
+
+        <div style={{ display: 'flex', gap: '12px' }}>
+          <button className="btn-secondary" style={{ flex: 1 }} onClick={onClose}>Cancel</button>
+          <button className="btn-primary" style={{ flex: 1 }} onClick={handleSubmit} disabled={isCalculating || !actual}>
+            Confirm Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+

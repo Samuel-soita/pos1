@@ -2,43 +2,72 @@ import { useState, useCallback } from 'react';
 import { db } from '../db/db';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Receipt, Plus, Trash2, Calendar, Filter, TrendingDown, Clock, Repeat } from 'lucide-react';
-import { v4 as uuidv4 } from 'uuid';
+import { generateTraceableId, getDeviceId } from '../utils/idUtils';
 import { useAuth } from '../hooks/useAuth';
 
-export function Expenses() {
-  const { businessId } = useAuth();
+export function Expenses({ initialView }: { initialView?: string }) {
+  const { businessId, business } = useAuth();
   const [showAddModal, setShowAddModal] = useState(false);
-  const [showRecurringModal, setShowRecurringModal] = useState(false);
+  const [showRecurringModal, setShowRecurringModal] = useState(initialView === 'recurring');
+  const [filter, setFilter] = useState<'all' | 'pending' | 'verified' | 'rejected'>('all');
   
   // Security check - already handled by Layout but we'll double check
   const securityModeSetting = useLiveQuery(() => db.settings.get('security_mode'));
   const isOwner = securityModeSetting?.value !== 'staff';
 
   const expenses = useLiveQuery(
-    () => db.expenses.orderBy('timestamp').reverse().toArray()
-  ) || [];
-
-  const recurringExpenses = useLiveQuery(
-    () => db.recurring_expenses.toArray()
+    () => {
+      const query = db.expenses.orderBy('timestamp').reverse();
+      if (filter !== 'all') {
+        return db.expenses.where('status').equals(filter).reverse().sortBy('timestamp');
+      }
+      return query.toArray();
+    }, [filter]
   ) || [];
 
   const totalExpenses = expenses.reduce((sum, e) => sum + e.amount, 0);
+  const pendingCount = useLiveQuery(() => db.expenses.where('status').equals('pending').count()) || 0;
 
-  const handleDelete = useCallback(async (id: string) => {
-    if (confirm('Are you sure you want to delete this expense?')) {
-      const now = Date.now();
-      await db.expenses.delete(id);
+  const handleVerify = useCallback(async (id: string, status: 'verified' | 'rejected') => {
+    const now = Date.now();
+    await db.transaction('rw', db.expenses, db.sync_queue, db.counters, db.settings, async () => {
+      await db.expenses.update(id, { 
+        status, 
+        verifiedAt: now,
+        verifiedBy: 'owner' 
+      });
+      const updated = await db.expenses.get(id);
+      const deviceId = await getDeviceId();
       await db.sync_queue.add({
-        id: uuidv4(),
-        action: 'DELETE',
+        id: await generateTraceableId('EXP', businessId!, business!.code, deviceId),
+        action: 'UPDATE',
         table: 'expenses',
-        payload: { id },
+        payload: updated,
         timestamp: now,
         status: 'pending',
         errorCount: 0
       });
+    });
+  }, [businessId, business]);
+
+  const handleDelete = useCallback(async (id: string) => {
+    if (confirm('Are you sure you want to delete this expense?')) {
+      const now = Date.now();
+      const deviceId = await getDeviceId();
+      await db.transaction('rw', db.expenses, db.sync_queue, db.counters, db.settings, async () => {
+          await db.expenses.delete(id);
+          await db.sync_queue.add({
+            id: await generateTraceableId('EXP', businessId!, business!.code, deviceId),
+            action: 'DELETE',
+            table: 'expenses',
+            payload: { id },
+            timestamp: now,
+            status: 'pending',
+            errorCount: 0
+          });
+        });
     }
-  }, []);
+  }, [businessId, business]);
 
   if (!isOwner) {
     return <QuickLog businessId={businessId || ''} />;
@@ -72,13 +101,13 @@ export function Expenses() {
           </div>
         </div>
         
-        <div className="card" style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
-          <div style={{ background: '#f1f5f9', padding: '16px', borderRadius: '16px' }}>
-            <Repeat size={32} color="var(--primary)" />
+        <div className="card" style={{ display: 'flex', alignItems: 'center', gap: '20px', cursor: 'pointer', border: filter === 'pending' ? '2px solid var(--primary)' : '1px solid var(--border)' }} onClick={() => setFilter(filter === 'pending' ? 'all' : 'pending')}>
+          <div style={{ background: '#fef3c7', padding: '16px', borderRadius: '16px' }}>
+            <Clock size={32} color="#b45309" />
           </div>
           <div>
-            <p style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-muted)' }}>Active Recurring Bills</p>
-            <h2 style={{ fontSize: '1.75rem', fontWeight: 800 }}>{recurringExpenses.filter(r => r.isActive).length} Items</h2>
+            <p style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-muted)' }}>Pending Verification</p>
+            <h2 style={{ fontSize: '1.75rem', fontWeight: 800 }}>{pendingCount} Items</h2>
           </div>
         </div>
       </div>
@@ -108,26 +137,50 @@ export function Expenses() {
                 </tr>
               ) : (
                 expenses.map(exp => (
-                  <tr key={exp.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                  <tr key={exp.id} style={{ borderBottom: '1px solid var(--border)', background: exp.status === 'pending' ? '#fffbeb' : 'transparent' }}>
                     <td style={{ padding: '16px 24px', fontSize: '0.875rem' }} data-label="Date">
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <Calendar size={14} color="var(--text-muted)" />
                         {new Date(exp.timestamp).toLocaleDateString()}
                       </div>
                     </td>
-                    <td style={{ padding: '16px 24px', fontWeight: 600 }} data-label="Title">{exp.title}</td>
+                    <td style={{ padding: '16px 24px' }} data-label="Title">
+                      <div style={{ fontWeight: 600 }}>{exp.title}</div>
+                      {exp.receiptImage && (
+                        <div style={{ fontSize: '0.7rem', color: 'var(--primary)', cursor: 'pointer', marginTop: '4px' }} onClick={() => alert('View receipt image placeholder')}>
+                          View Receipt 📷
+                        </div>
+                      )}
+                    </td>
                     <td style={{ padding: '16px 24px' }} data-label="Category">
-                      <span style={{ background: '#f1f5f9', padding: '4px 12px', borderRadius: 'full', fontSize: '0.75rem', fontWeight: 600 }}>
-                        {exp.category}
-                      </span>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                        <span style={{ background: '#f1f5f9', padding: '4px 8px', borderRadius: 'full', fontSize: '0.7rem', fontWeight: 600, width: 'fit-content' }}>
+                          {exp.category}
+                        </span>
+                        <span style={{ 
+                          fontSize: '0.65rem', 
+                          fontWeight: 800, 
+                          color: exp.status === 'verified' ? 'var(--success)' : exp.status === 'rejected' ? 'var(--danger)' : '#b45309' 
+                        }}>
+                          {(exp.status || 'verified').toUpperCase()}
+                        </span>
+                      </div>
                     </td>
                     <td style={{ padding: '16px 24px', textAlign: 'right', fontWeight: 700, color: 'var(--danger)' }} data-label="Amount">
                       KES {exp.amount.toLocaleString()}
                     </td>
                     <td style={{ padding: '16px 24px', textAlign: 'right' }} data-label="Actions">
-                      <button onClick={() => handleDelete(exp.id)} style={{ padding: '8px', minHeight: '40px', background: 'transparent', color: 'var(--danger)', width: '100%', display: 'flex', justifyContent: 'center' }}>
-                        <Trash2 size={18} /> <span className="mobile-only" style={{ marginLeft: '8px' }}>Delete</span>
-                      </button>
+                      <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                        {exp.status === 'pending' && (
+                          <>
+                            <button onClick={() => handleVerify(exp.id, 'verified')} style={{ padding: '4px 8px', background: 'var(--success)', color: 'white', borderRadius: '6px', fontSize: '0.75rem' }}>Verify</button>
+                            <button onClick={() => handleVerify(exp.id, 'rejected')} style={{ padding: '4px 8px', background: 'var(--danger)', color: 'white', borderRadius: '6px', fontSize: '0.75rem' }}>Reject</button>
+                          </>
+                        )}
+                        <button onClick={() => handleDelete(exp.id)} style={{ padding: '8px', color: 'var(--text-muted)' }}>
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -144,33 +197,55 @@ export function Expenses() {
 }
 
 function AddExpenseModal({ onClose, businessId }: { onClose: () => void, businessId: string }) {
+  const { userType, business } = useAuth();
   const [title, setTitle] = useState('');
   const [amount, setAmount] = useState('');
   const [category, setCategory] = useState('');
+  const [receiptImage, setReceiptImage] = useState<string | null>(null);
+
+  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setReceiptImage(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title || !amount || !category) return;
 
     const now = Date.now();
-    const newExpense = {
-      id: uuidv4(),
-      businessId,
-      title,
-      amount: parseFloat(amount),
-      category,
-      timestamp: now
-    };
+    const deviceId = await getDeviceId();
 
-    await db.expenses.add(newExpense);
-    await db.sync_queue.add({
-      id: uuidv4(),
-      action: 'INSERT',
-      table: 'expenses',
-      payload: newExpense,
-      timestamp: now,
-      status: 'pending',
-      errorCount: 0
+    await db.transaction('rw', db.expenses, db.sync_queue, db.counters, db.settings, async () => {
+      const id = await generateTraceableId('EXP', businessId, business!.code, deviceId);
+      const newExpense = {
+        id,
+        businessId,
+        title,
+        amount: parseFloat(amount),
+        category,
+        timestamp: now,
+        receiptImage: receiptImage || undefined,
+        description: title,
+        status: (userType === 'owner' ? 'verified' : 'pending') as 'pending' | 'verified' | 'rejected',
+        syncStatus: 'pending' as const
+      };
+
+      await db.expenses.add(newExpense);
+      await db.sync_queue.add({
+        id: await generateTraceableId('EXP', businessId, business!.code, deviceId),
+        action: 'INSERT',
+        table: 'expenses',
+        payload: newExpense,
+        timestamp: now,
+        status: 'pending',
+        errorCount: 0
+      });
     });
 
     onClose();
@@ -202,6 +277,11 @@ function AddExpenseModal({ onClose, businessId }: { onClose: () => void, busines
               <option value="Other" />
             </datalist>
           </div>
+          <div className="input-group">
+            <label>Attach Receipt (optional)</label>
+            <input type="file" accept="image/*" capture="environment" onChange={handleImageChange} style={{ fontSize: '0.8rem' }} />
+            {receiptImage && <p style={{ fontSize: '0.7rem', color: 'var(--success)', marginTop: '4px' }}>✓ Image captured</p>}
+          </div>
           <div style={{ display: 'flex', gap: '12px', marginTop: '8px' }}>
             <button type="button" className="btn-secondary" style={{ flex: 1 }} onClick={onClose}>Cancel</button>
             <button type="submit" className="btn-primary" style={{ flex: 1 }}>Save Expense</button>
@@ -213,10 +293,23 @@ function AddExpenseModal({ onClose, businessId }: { onClose: () => void, busines
 }
 
 function QuickLog({ businessId }: { businessId: string }) {
+  const { userType, business } = useAuth();
   const [title, setTitle] = useState('');
   const [amount, setAmount] = useState('');
   const [category, setCategory] = useState('');
+  const [receiptImage, setReceiptImage] = useState<string | null>(null);
   const [status, setStatus] = useState<'idle' | 'saving' | 'success'>('idle');
+
+  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setReceiptImage(reader.result as string);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -224,24 +317,33 @@ function QuickLog({ businessId }: { businessId: string }) {
 
     setStatus('saving');
     const now = Date.now();
-    const newExpense = {
-      id: uuidv4(),
-      businessId,
-      title,
-      amount: parseFloat(amount),
-      category,
-      timestamp: now
-    };
+    const deviceId = await getDeviceId();
+    
+    await db.transaction('rw', db.expenses, db.sync_queue, db.counters, db.settings, async () => {
+      const id = await generateTraceableId('EXP', businessId, business!.code, deviceId);
+      const newExpense = {
+        id,
+        businessId,
+        title,
+        amount: parseFloat(amount),
+        category,
+        timestamp: now,
+        receiptImage: receiptImage || undefined,
+        description: title,
+        status: (userType === 'owner' ? 'verified' : 'pending') as 'pending' | 'verified' | 'rejected',
+        syncStatus: 'pending' as const
+      };
 
-    await db.expenses.add(newExpense);
-    await db.sync_queue.add({
-      id: uuidv4(),
-      action: 'INSERT',
-      table: 'expenses',
-      payload: newExpense,
-      timestamp: now,
-      status: 'pending',
-      errorCount: 0
+      await db.expenses.add(newExpense);
+      await db.sync_queue.add({
+        id: await generateTraceableId('EXP', businessId, business!.code, deviceId),
+        action: 'INSERT',
+        table: 'expenses',
+        payload: newExpense,
+        timestamp: now,
+        status: 'pending',
+        errorCount: 0
+      });
     });
 
     setStatus('success');
@@ -292,6 +394,10 @@ function QuickLog({ businessId }: { businessId: string }) {
                 </datalist>
               </div>
             </div>
+            <div className="input-group">
+              <label>Attach Receipt (optional)</label>
+              <input type="file" accept="image/*" capture="environment" onChange={handleImageChange} />
+            </div>
             <button type="submit" className="btn-primary" style={{ marginTop: '16px' }} disabled={status === 'saving'}>
               {status === 'saving' ? 'Saving...' : 'Confirm Log'}
             </button>
@@ -304,6 +410,7 @@ function QuickLog({ businessId }: { businessId: string }) {
 
 function RecurringExpensesModal({ onClose, businessId }: { onClose: () => void, businessId: string }) {
   const recurring = useLiveQuery(() => db.recurring_expenses.toArray()) || [];
+  const { business } = useAuth();
   const [showForm, setShowForm] = useState(false);
   
   // Form State
@@ -316,24 +423,29 @@ function RecurringExpensesModal({ onClose, businessId }: { onClose: () => void, 
     e.preventDefault();
     if (!title || !amount) return;
 
+    const now = Date.now();
+    const deviceId = await getDeviceId();
+    const id = await generateTraceableId('EXP', businessId, business!.code, deviceId);
+
     const newRec = {
-      id: uuidv4(),
+      id,
       businessId,
       title,
       amount: parseFloat(amount),
       category: category || 'General',
       frequency,
-      nextRun: Date.now(), // Process immediately on next background check
-      isActive: true
+      nextRun: now, // Process immediately on next background check
+      isActive: true,
+      syncStatus: 'pending' as const
     };
 
     await db.recurring_expenses.add(newRec);
     await db.sync_queue.add({
-      id: uuidv4(),
+      id: await generateTraceableId('EXP', businessId, business!.code, deviceId),
       action: 'INSERT',
       table: 'recurring_expenses',
       payload: newRec,
-      timestamp: Date.now(),
+      timestamp: now,
       status: 'pending',
       errorCount: 0
     });
@@ -345,9 +457,12 @@ function RecurringExpensesModal({ onClose, businessId }: { onClose: () => void, 
   const toggleActive = useCallback(async (item: { id: string; businessId: string; title: string; amount: number; category: string; frequency: 'daily' | 'weekly' | 'monthly'; nextRun: number; isActive: boolean }) => {
     const newStatus = !item.isActive;
     const now = Date.now();
+    // const { business } = useAuth();
+    const deviceId = await getDeviceId();
+
     await db.recurring_expenses.update(item.id, { isActive: newStatus });
     await db.sync_queue.add({
-      id: uuidv4(),
+      id: await generateTraceableId('EXP', businessId, business!.code, deviceId),
       action: 'UPDATE',
       table: 'recurring_expenses',
       payload: { ...item, isActive: newStatus },
@@ -355,7 +470,7 @@ function RecurringExpensesModal({ onClose, businessId }: { onClose: () => void, 
       status: 'pending',
       errorCount: 0
     });
-  }, []);
+  }, [businessId, business]);
 
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '20px' }}>

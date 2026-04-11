@@ -40,9 +40,9 @@ export function UpdateManager() {
               <Sparkles size={20} color="var(--primary)" />
             </div>
             <div>
-              <h4 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 700 }}>New Features Ready!</h4>
+              <h4 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 700 }}>Update Available</h4>
               <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                An update is available with improvements.
+                Please finish your active sale before updating.
               </p>
             </div>
           </div>

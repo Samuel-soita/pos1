@@ -1,8 +1,10 @@
 import { useState } from 'react';
-import { db, type Product } from '../db/db';
+import { db, type Product, type SplitPayment } from '../db/db';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { v4 as uuidv4 } from 'uuid';
+import { generateTraceableId, getDeviceId } from '../utils/idUtils';
 import { useAuth } from './useAuth';
+import { useCashControl } from './useCashControl';
+import { useShifts } from './useShifts';
 
 export interface CartItem {
   id: string;
@@ -14,8 +16,24 @@ export interface CartItem {
 
 export function useSales() {
   const [cart, setCart] = useState<CartItem[]>([]);
-  const sales = useLiveQuery(() => db.sales.orderBy('timestamp').reverse().toArray()) || [];
-  const { businessId } = useAuth();
+  const { businessId, business, branchId, userType, staffId } = useAuth();
+  const { isRegisterOpen } = useCashControl();
+  const { recordSaleToShift } = useShifts();
+
+  const sales = useLiveQuery(async () => {
+    if (!businessId) return [];
+    const query = db.sales.where('businessId').equals(businessId);
+    
+    if (userType === 'staff' && branchId) {
+       return await db.sales
+        .where('businessId').equals(businessId)
+        .filter(s => s.branchId === branchId)
+        .reverse()
+        .toArray();
+    }
+    
+    return await query.reverse().toArray();
+  }, [businessId, branchId, userType]) || [];
 
   const addToCart = (product: Product) => {
     if (!product.id) return;
@@ -49,17 +67,21 @@ export function useSales() {
 
   const clearCart = () => setCart([]);
 
-  const completeSale = async (taxRate: number = 0, taxAmount: number = 0, paymentMethod: string = 'Cash', transactionCode?: string) => {
+  const completeSale = async (taxRate: number = 0, taxAmount: number = 0, paymentMethod: string = 'Cash', transactionCode?: string, splitPayments?: SplitPayment[]) => {
     if (cart.length === 0 || !businessId) return;
+    if (!isRegisterOpen) {
+      alert('Register is closed. You must set an opening float before making sales.');
+      return;
+    }
 
     const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
     const totalCost = cart.reduce((sum, item) => sum + item.costPrice * item.quantity, 0);
-    // Correct Profit Calculation: Profit is Revenue minus Tax minus Cost of Goods
     const totalProfit = total - taxAmount - totalCost;
     
-    const receiptId = `REC-${Date.now()}`;
     const timestamp = Date.now();
-    const deviceId = (await db.settings.get('device_id'))?.value as string || 'UNKNOWN';
+    const deviceId = await getDeviceId();
+    const saleId = await generateTraceableId('ORD', businessId, business!.code, deviceId);
+    const receiptId = saleId; 
 
     const saleItems = cart.map(item => ({
       productId: item.id,
@@ -69,12 +91,39 @@ export function useSales() {
       costPrice: item.costPrice,
     }));
 
-    // Start a transaction to ensure atomic updates
     try {
-      await db.transaction('rw', db.products, db.sales, db.sync_queue, async () => {
-        // 1. Record the sale locally
-        const newSale = {
-          id: uuidv4(),
+      await db.transaction('rw', [db.products, db.sales, db.pos_events, db.snapshots, db.counters, db.settings], async () => {
+        // 1. Immutable Event Generation (Sale)
+        const saleEvent = {
+          event_id: await generateTraceableId('EVT', businessId, business!.code, deviceId),
+          business_id: businessId,
+          staff_id: staffId || 'UNKNOWN',
+          event_type: 'sale_created' as const,
+          payload: {
+             id: saleId,
+             total,
+             totalProfit,
+             receiptId,
+             items: saleItems,
+             taxRate,
+             taxAmount,
+             paymentMethod,
+             splitPayments,
+             transactionCode,
+             deviceId,
+             branchId
+          },
+          client_timestamp: timestamp,
+          server_timestamp: timestamp,
+          hash: 'LATER',
+          sync_status: 'pending' as const
+        };
+        await db.pos_events.add(saleEvent);
+
+        // 2. Compute state change locally for instant UI response (Sales Snapshot)
+        // For backwards compatibility with standard db.sales, we map the payload to the local sales table view
+        await db.sales.add({
+          id: saleId,
           businessId,
           total,
           totalProfit,
@@ -84,44 +133,47 @@ export function useSales() {
           taxRate,
           taxAmount,
           paymentMethod,
+          splitPayments,
           transactionCode,
           deviceId,
-        };
-        await db.sales.add(newSale);
-        
-        // Queue the sale for cloud sync
-        await db.sync_queue.add({
-          id: uuidv4(),
-          action: 'INSERT',
-          table: 'sales',
-          payload: newSale,
-          timestamp: Date.now(),
-          status: 'pending',
-          errorCount: 0
+          branchId: branchId || undefined,
+          staffId: staffId || undefined,
+          syncStatus: 'synced' // Marked synced purely for the UI. The real sync queue is pos_events.
         });
-
-        // 2. Reduce stock locally and queue sync delta
+        
+        // 3. Immutable Event Generation (Stock)
         for (const item of cart) {
           const product = await db.products.get(item.id);
           if (product) {
+            const stockEvent = {
+              event_id: await generateTraceableId('EVT', businessId, business!.code, deviceId),
+              business_id: businessId,
+              staff_id: staffId || 'UNKNOWN',
+              event_type: 'stock_reserved' as const,
+              payload: {
+                productId: item.id,
+                delta: -item.quantity
+              },
+              client_timestamp: Date.now(),
+              server_timestamp: Date.now(),
+              hash: 'LATER',
+              sync_status: 'pending' as const
+            };
+            await db.pos_events.add(stockEvent);
+
+            // Directly update the generic 'products' UI list (Our materialized stock snapshot)
             await db.products.update(item.id, {
               quantity: product.quantity - item.quantity,
               updatedAt: Date.now()
             });
-
-            // Queue the stock delta natively so the server knows exactly what happened offline
-            await db.sync_queue.add({
-              id: uuidv4(),
-              action: 'STOCK_DELTA',
-              table: 'products',
-              payload: { id: item.id, businessId, delta: -item.quantity },
-              timestamp: Date.now(),
-              status: 'pending',
-              errorCount: 0
-            });
           }
         }
       });
+
+      // Record to active shift if applicable (Shift system needs refactor eventually but ok for now)
+      if (typeof recordSaleToShift === 'function') {
+        await recordSaleToShift(total, paymentMethod);
+      }
 
       clearCart();
       return { success: true, receiptId };

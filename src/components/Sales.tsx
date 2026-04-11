@@ -1,19 +1,22 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useInventory } from '../hooks/useInventory';
 import { useSales } from '../hooks/useSales';
 import { useSubscription } from '../hooks/useSubscription';
 import { useAuth } from '../hooks/useAuth';
-import { Search, ShoppingCart, Trash2, Plus, Minus, CheckCircle, X, Banknote, Smartphone, History as HistoryIcon, ArrowLeft } from 'lucide-react';
+
+import { Search, ShoppingCart, Trash2, Plus, Minus, CheckCircle, X, Banknote, Smartphone, History as HistoryIcon, ArrowLeft, Printer, Sparkles } from 'lucide-react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, type Product, type Sale } from '../db/db';
 import { usePrinter } from '../hooks/usePrinter';
 import { BarcodeScanner } from './BarcodeScanner';
 import { History } from './History';
+import { playChime } from '../utils/audio';
+import { useSyncStatus } from '../hooks/useSync';
 
 export function Sales() {
   const { products } = useInventory();
   const { cart, addToCart, removeFromCart, updateCartQuantity, completeSale, cartTotal } = useSales();
-  const { status } = useSubscription();
+
   const { business, businessId } = useAuth();
   
   const [view, setView] = useState<'pos' | 'history'>('pos');
@@ -26,12 +29,44 @@ export function Sales() {
   const [mpesaCode, setMpesaCode] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<'Cash' | 'Card' | 'M-Pesa'>('Cash');
   const { printReceipt } = usePrinter();
+  const { status: subStatus, limitReached, message: subMessage } = useSubscription();
+  const [lastSale, setLastSale] = useState<Sale | null>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const { isOnline, pendingCount } = useSyncStatus();
+  
+  // Sensory States
+  const [glowingProductId, setGlowingProductId] = useState<string | null>(null);
+  const [triggerTotalPulse, setTriggerTotalPulse] = useState(false);
+  const [cashAmount, setCashAmount] = useState<string>('');
+  const { staff } = useAuth();
+
+  // Speed Optimization: Auto-focus search on mount/view change
+  useEffect(() => {
+    if (view === 'pos') {
+      setTimeout(() => searchInputRef.current?.focus(), 100);
+    }
+  }, [view]);
+
+  // Speed Optimization: Keyboard Shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setSearchTerm('');
+        searchInputRef.current?.focus();
+      }
+      if (e.key === 'Enter' && cart.length > 0 && !showCheckoutModal && !showSuccess) {
+        setShowCheckoutModal(true);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [cart.length, showCheckoutModal, showSuccess]);
 
 
   const taxRateSetting = useLiveQuery(() => db.settings.get('tax_rate'));
   const taxRate = typeof taxRateSetting?.value === 'number' ? taxRateSetting.value : 0;
 
-  const categories = ['All', ...Array.from(new Set(products.map(p => p.category || 'General')))];
+  const categories = ['All', ...Array.from(new Set(products.map(p => p.category || 'General'))).sort()];
 
   const filteredProducts = products.filter(p => {
     const matchesSearch = p.name.toLowerCase().includes(searchTerm.toLowerCase()) || (p.barcode && p.barcode.includes(searchTerm));
@@ -41,23 +76,48 @@ export function Sales() {
 
   const handleScanProduct = (product: Product, customPrice?: number) => {
     const productWithPrice = { ...product, price: customPrice ?? product.price };
+    triggerSensoryFeedback(product.id!);
     addToCart(productWithPrice);
   };
 
+  const triggerSensoryFeedback = (productId: string) => {
+    playChime();
+    setGlowingProductId(productId);
+    setTriggerTotalPulse(true);
+    setTimeout(() => {
+      setGlowingProductId(null);
+      setTriggerTotalPulse(false);
+    }, 400);
+  };
+
   const executePayment = async (method: string) => {
-    if (status === 'locked') return;
+    if (limitReached) {
+      alert("Emergency Sales Limit Reached. Please renew your subscription to continue.");
+      return;
+    }
+
     const taxAmount = cartTotal - (cartTotal / (1 + (taxRate / 100))); 
     const currentCart = [...cart];
     const result = await completeSale(taxRate, taxAmount, method, method === 'M-Pesa' ? mpesaCode : undefined);
     
     if (result?.success) {
+      // If suspended, increment the emergency counter
+      if (subStatus === 'suspended') {
+        const bus = await db.businesses.get(businessId || '');
+        if (bus) {
+          await db.businesses.update(bus.id, { 
+            suspendedRevenueCount: (bus.suspendedRevenueCount || 0) + 1 
+          });
+        }
+      }
+
       setShowCheckoutModal(false);
       setShowSuccess(true);
       setMpesaCode('');
       
       const saleToPrint = {
         id: result.receiptId,
-        businessId: businessId,
+        businessId: businessId || '',
         receiptId: result.receiptId,
         total: cartTotal,
         totalProfit: 0,
@@ -67,17 +127,22 @@ export function Sales() {
           name: item.name,
           quantity: item.quantity,
           price: item.price,
-          costPrice: item.costPrice || 0
+          costPrice: (item as any).costPrice || 0
         })),
         taxRate,
         taxAmount,
         paymentMethod: method,
-        transactionCode: method === 'M-Pesa' ? mpesaCode : undefined
+        transactionCode: method === 'M-Pesa' ? mpesaCode : undefined,
+        deviceId: '',
       };
       
-      await printReceipt(saleToPrint as Sale, business?.name || 'SMUTA PAY');
-
-      setTimeout(() => setShowSuccess(false), 3000);
+      // Silent attempt - never block on printer failure
+      try {
+        setLastSale(saleToPrint as Sale);
+        if (business) await printReceipt(saleToPrint as Sale, business);
+      } catch (e) {
+        console.warn("Printer failed, but sale recorded:", e);
+      }
     }
   };
 
@@ -98,6 +163,23 @@ export function Sales() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+      {subStatus !== 'active' && subStatus !== 'trial' && (
+        <div style={{ 
+          background: subStatus === 'suspended' ? '#fef2f2' : '#fffbeb', 
+          border: `1px solid ${subStatus === 'suspended' ? '#fee2e2' : '#fef3c7'}`,
+          padding: '10px 16px',
+          borderRadius: '12px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '10px',
+          color: subStatus === 'suspended' ? '#991b1b' : '#92400e',
+          fontSize: '0.9rem',
+          fontWeight: 600
+        }}>
+          <Sparkles size={18} />
+          {subMessage}
+        </div>
+      )}
       <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div style={{ display: 'flex', gap: '8px' }}>
           <button 
@@ -144,8 +226,9 @@ export function Sales() {
           <div style={{ position: 'relative', flex: 1 }}>
             <Search style={{ position: 'absolute', left: '12px', top: '12px', color: 'var(--text-muted)' }} size={18} />
             <input 
+              ref={searchInputRef}
               type="text" 
-              placeholder="Search products..." 
+              placeholder="Search or Scan products..." 
               style={{ paddingLeft: '40px', minHeight: '44px', fontSize: '1rem' }}
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
@@ -170,17 +253,31 @@ export function Sales() {
           {filteredProducts.map(product => (
             <div 
               key={product.id} 
-              className="product-card" 
-              onClick={() => product.quantity > 0 && addToCart(product)} 
+              className={`product-card ${glowingProductId === product.id ? 'item-glow-trigger' : ''}`} 
+              onClick={() => {
+                if (product.quantity > 0) {
+                  triggerSensoryFeedback(product.id!);
+                  addToCart(product);
+                }
+              }} 
               style={{ 
                 cursor: product.quantity > 0 ? 'pointer' : 'not-allowed', 
                 opacity: product.quantity > 0 ? 1 : 0.6,
-                padding: '12px'
+                padding: '12px',
+                background: product.quantity <= product.lowStockThreshold ? '#fff1f1' : 'var(--card)',
+                borderColor: product.quantity <= product.lowStockThreshold ? '#fee2e2' : 'var(--border)'
               }}
             >
               <div style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '2px' }}>{product.name}</div>
               <div style={{ color: 'var(--primary)', fontWeight: 800, fontSize: '1rem' }}>KES {product.price.toLocaleString()}</div>
-              <div className={`stock-badge ${product.quantity <= product.lowStockThreshold ? 'stock-low' : 'stock-ok'}`} style={{ marginTop: '6px', fontSize: '0.65rem' }}>
+              <div className={`stock-badge ${product.quantity <= product.lowStockThreshold ? 'stock-low' : 'stock-ok'}`} 
+                style={{ 
+                  marginTop: '6px', 
+                  fontSize: '0.7rem', 
+                  fontWeight: 800,
+                  border: product.quantity <= product.lowStockThreshold ? '1px solid var(--danger)' : 'none',
+                  animation: product.quantity <= product.lowStockThreshold ? 'pulse 2s infinite' : 'none'
+                }}>
                 Stock: {product.quantity}
               </div>
             </div>
@@ -227,27 +324,71 @@ export function Sales() {
         <div style={{ borderTop: '1px dashed var(--border)', paddingTop: '16px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '1.1rem', fontWeight: 800, marginBottom: '16px' }}>
             <span>Total</span>
-            <span>KES {cartTotal.toLocaleString()}</span>
+            <span className={triggerTotalPulse ? 'total-pulse-trigger' : ''}>KES {cartTotal.toLocaleString()}</span>
           </div>
           
-          {showSuccess && (
-            <div style={{ background: '#dcfce7', color: '#166534', padding: '10px', borderRadius: '10px', textAlign: 'center', marginBottom: '12px', fontSize: '0.85rem', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
-              <CheckCircle size={16} />
-              Sale Completed!
-            </div>
-          )}
-
           <button 
             className="btn-primary" 
             style={{ width: '100%', height: '52px', fontSize: '1.1rem' }}
-            disabled={cart.length === 0 || status === 'locked'}
+            disabled={cart.length === 0 || limitReached}
             onClick={() => setShowCheckoutModal(true)}
           >
             Complete Checkout
           </button>
         </div>
-        </div>
       </div>
+
+      {/* Success Modal with Hardware Fallback */}
+      {showSuccess && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
+          <div className="card modal-responsive" style={{ padding: '40px', textAlign: 'center' }}>
+            <div style={{ width: '80px', height: '80px', background: 'var(--success)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 24px', boxShadow: '0 0 20px rgba(34, 197, 94, 0.4)' }}>
+              <CheckCircle color="white" size={48} />
+            </div>
+            <p style={{ color: 'var(--text-muted)', marginBottom: '32px' }}>Sale has been recorded and inventory updated.</p>
+
+            <div className="confidence-strip" style={{ marginBottom: '32px', borderRadius: '12px' }}>
+              <div className="confidence-item">
+                <span className="confidence-check">✔</span> Stock
+              </div>
+              <div className="confidence-item">
+                <span className="confidence-check">✔</span> Saved
+              </div>
+              <div className="confidence-item">
+                {isOnline && pendingCount === 0 ? (
+                  <><span className="confidence-check">✔</span> Cloud</>
+                ) : (
+                  <><span style={{ color: 'var(--warning)' }}>⏳</span> Pending</>
+                )}
+              </div>
+            </div>
+            
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <button 
+                className="btn-secondary" 
+                style={{ width: '100%', gap: '8px' }}
+                onClick={async () => {
+                  if (lastSale && business) {
+                    await printReceipt(lastSale, business);
+                  }
+                }}
+              >
+                <Printer size={20} /> Print Receipt Again
+              </button>
+              <button 
+                className="btn-primary" 
+                style={{ width: '100%', padding: '16px', fontSize: '1.1rem' }}
+                onClick={() => {
+                  setShowSuccess(false);
+                  // Cart is already cleared by completeSale
+                }}
+              >
+                Start Next Sale
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Floating Checkout Button for Mobile */}
       {cart.length > 0 && !showCheckoutModal && (
@@ -307,9 +448,48 @@ export function Sales() {
               )}
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '1.5rem', fontWeight: 800 }}>
                 <span>Total</span>
-                <span>KES {cartTotal.toLocaleString()}</span>
+                <span style={{ color: 'var(--primary)' }}>KES {cartTotal.toLocaleString()}</span>
               </div>
             </div>
+
+            {paymentMethod === 'Cash' && (
+              <div style={{ marginBottom: '24px' }}>
+                <label style={{ fontWeight: 800, marginBottom: '12px' }}>Quick Cash Selection</label>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px', marginBottom: '16px' }}>
+                  {[100, 200, 500, 1000].map(amt => (
+                    <button 
+                      key={amt} 
+                      className="btn-secondary" 
+                      style={{ padding: '12px', minHeight: '48px', fontSize: '0.9rem', border: cashAmount === amt.toString() ? '2px solid var(--primary)' : '' }}
+                      onClick={() => setCashAmount(amt.toString())}
+                    >
+                      + {amt}
+                    </button>
+                  ))}
+                </div>
+                
+                <div className="input-with-icon-wrapper">
+                  <label>Cash Received</label>
+                  <input 
+                    type="number" 
+                    value={cashAmount} 
+                    onChange={e => setCashAmount(e.target.value)}
+                    placeholder="0.00"
+                    style={{ fontSize: '1.5rem', fontWeight: 800, textAlign: 'right', paddingRight: '20px' }}
+                  />
+                </div>
+
+                {parseFloat(cashAmount) >= cartTotal && (
+                  <div className="fade-in" style={{ marginTop: '16px', padding: '16px', background: '#f0fdf4', borderRadius: '12px', border: '1px solid #dcfce7', textAlign: 'center' }}>
+                    <p style={{ fontSize: '0.85rem', color: '#166534', fontWeight: 700, textTransform: 'uppercase', marginBottom: '4px' }}>Change Due</p>
+                    <p style={{ fontSize: '2rem', fontWeight: 900, color: '#15803d' }}>KES {(parseFloat(cashAmount) - cartTotal).toLocaleString()}</p>
+                    {parseFloat(cashAmount) === cartTotal && (
+                      <div style={{ fontSize: '0.75rem', color: '#10b981', fontWeight: 800 }}>EXACT AMOUNT GIVEN ✔</div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
               <div style={{ display: 'flex', gap: '8px' }}>
@@ -376,6 +556,16 @@ export function Sales() {
           onClose={() => setShowScanner(false)}
         />
       )}
+    </div>
+    <footer style={{ marginTop: '20px', padding: '12px', background: 'var(--bg-secondary)', borderRadius: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: 'var(--success)' }}></div>
+          Active Terminal: <strong>#{(localStorage.getItem('deviceId') || '01').substring(0,4).toUpperCase()}</strong>
+        </div>
+        <div>
+          Logged in as: <strong>{staff ? `${staff.firstName} ${staff.lastName}` : 'Owner'}</strong> {staff?.code && `(Staff ${staff.code})`}
+        </div>
+    </footer>
     </div>
   );
 }

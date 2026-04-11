@@ -11,6 +11,77 @@ export interface Product {
   updatedAt: number;
   category?: string;
   barcode?: string;
+  branchId?: string;
+}
+
+export interface Counter {
+  id: string; // businessId_entityType
+  businessId: string;
+  entityType: string;
+  count: number;
+}
+
+// ==========================================
+// NEW EVENT-SOURCED ARCHITECTURE
+// ==========================================
+
+export interface POSEvent {
+  event_id: string; // UUIDv4
+  business_id: string;
+  staff_id: string;
+  event_type: 'sale_created' | 'stock_reserved' | 'stock_committed' | 'payment_received' | 'shift_opened' | 'stock_rejected';
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  payload: any;
+  client_timestamp: number;
+  server_timestamp: number;
+  hash: string;
+  sync_status: 'pending' | 'synced' | 'failed' | 'rejected_dlq';
+}
+
+export interface MaterializedSnapshot {
+  id: string; // E.g. 'stock_STATUS_VAR'
+  business_id: string;
+  view_type: 'stock' | 'sales' | 'cash';
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  state: any;
+  last_applied_event: string;
+  updated_at: number;
+}
+
+// Legacy structures (to be deprecated by Snapshots)
+export interface Branch {
+  id: string; // UUID
+  businessId: string;
+  name: string;
+  location?: string;
+}
+
+export interface Shift {
+  id: string; // UUID
+  businessId: string;
+  staffId: string;
+  branchId?: string;
+  startTime: number;
+  endTime?: number;
+  totalSales: number;
+  cashSales: number;
+  mpesaSales: number;
+  status: 'active' | 'completed';
+  syncStatus?: 'pending' | 'synced' | 'failed';
+}
+
+export interface SaleItem {
+  productId: string;
+  name: string;
+  quantity: number;
+  price: number;
+  costPrice: number;
+}
+
+export interface SplitPayment {
+  method: 'Cash' | 'Card' | 'M-Pesa';
+  amount: number;
+  transactionCode?: string;
 }
 
 export interface Sale {
@@ -20,12 +91,16 @@ export interface Sale {
   totalProfit: number;
   timestamp: number;
   receiptId: string;
-  items: Array<{ productId: string; name: string; quantity: number; price: number; costPrice: number }>;
-  taxRate?: number;
-  taxAmount?: number;
-  paymentMethod?: string;
+  items: SaleItem[];
+  taxRate: number;
+  taxAmount: number;
+  paymentMethod: string; // Keep for backward compatibility, or set to 'Split'
+  splitPayments?: SplitPayment[]; // Support for multiple methods
   transactionCode?: string;
-  deviceId?: string;
+  deviceId: string;
+  branchId?: string;
+  staffId?: string; // Track who made the sale
+  syncStatus?: 'pending' | 'synced' | 'failed';
 }
 
 export interface Purchase {
@@ -34,6 +109,7 @@ export interface Purchase {
   total: number;
   timestamp: number;
   items: Array<{ productId: string; name: string; quantity: number; price: number }>;
+  syncStatus?: 'pending' | 'synced' | 'failed';
 }
 
 export interface Expense {
@@ -41,9 +117,30 @@ export interface Expense {
   businessId: string;
   title: string;
   amount: number;
-  category: string;
+  description: string;
   timestamp: number;
-  isRecurring?: boolean;
+  category: string;
+  receiptImage?: string; // Base64
+  status: 'pending' | 'verified' | 'rejected';
+  verifiedBy?: string;
+  verifiedAt?: number;
+  branchId?: string;
+  syncStatus?: 'pending' | 'synced' | 'failed';
+}
+
+export interface CashLog {
+  id: string;
+  businessId: string;
+  staffId: string;
+  date: string; // YYYY-MM-DD
+  branchId?: string; // Multi-branch support
+  openingFloat: number;
+  expectedClosing: number;
+  actualClosing?: number;
+  discrepancy?: number;
+  timestamp: number;
+  status: 'open' | 'closed';
+  syncStatus?: 'pending' | 'synced' | 'failed';
 }
 
 export interface RecurringExpense {
@@ -55,6 +152,7 @@ export interface RecurringExpense {
   frequency: 'daily' | 'weekly' | 'monthly';
   nextRun: number;
   isActive: boolean;
+  branchId?: string;
 }
 
 export interface Business {
@@ -62,11 +160,19 @@ export interface Business {
   name: string;
   code: string; // 4-digit code (0001+)
   pin: string; // 4-digit PIN
-  packageId: 'hustler' | 'biashara' | 'boss';
+  ownerEmail?: string;
+  telephone?: string;
+  address?: string;
+  kraPin?: string;
+  packageId: string; // Dynamic package identifiers for custom plans
   expiryDate: number;
-  status: 'active' | 'expired' | 'locked';
+  status: 'trial' | 'grace' | 'active' | 'pending_payment' | 'suspended';
+  trialUsed: boolean;
+  lastPaymentRef?: string;
+  suspendedRevenueCount: number; // Tracks 20-sale limit during suspension
   staffCount: number;
   customFeatureCount?: number;
+  businessType?: 'sole_proprietor' | 'multi_branch';
 }
 
 export interface Staff {
@@ -78,13 +184,14 @@ export interface Staff {
   phoneNumber: string;
   firstName: string;
   lastName: string;
-  status: 'active' | 'suspended';
+  status: 'active' | 'inactive';
+  branchId?: string;
 }
 
 export interface SyncQueueItem {
   id: string; // UUID
   action: 'INSERT' | 'UPDATE' | 'DELETE' | 'STOCK_DELTA' | 'VERIFY_PAYMENT';
-  table: 'products' | 'sales' | 'purchases' | 'businesses' | 'staff' | 'expenses' | 'recurring_expenses';
+  table: 'products' | 'sales' | 'purchases' | 'businesses' | 'staff' | 'expenses' | 'recurring_expenses' | 'cash_logs' | 'shifts' | 'branches' | 'payment_requests' | 'inventory_ledger';
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   payload: any;
   timestamp: number;
@@ -98,6 +205,34 @@ export interface Setting {
   value: unknown;
 }
 
+export interface Counter {
+  id: string; // businessId_entityType
+  businessId: string;
+  entityType: string;
+  count: number;
+}
+
+export interface InventoryLedgerEvent {
+  id: string; // trace ID
+  businessId: string;
+  productId: string;
+  action: 'ADD' | 'SALE' | 'REFUND' | 'WASTE';
+  quantity: number;
+  recordedAt: number;
+  traceId?: string; // Links back to the parent Sale/Expense ID
+  syncStatus?: 'pending' | 'synced' | 'failed';
+}
+
+export interface DLQItem {
+  id: string;
+  businessId: string;
+  tableName: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  payload: any;
+  errorMessage?: string;
+  failedAt: number;
+}
+
 const db = new Dexie('POSDatabase') as Dexie & {
   products: EntityTable<Product, 'id'>;
   sales: EntityTable<Sale, 'id'>;
@@ -108,19 +243,34 @@ const db = new Dexie('POSDatabase') as Dexie & {
   staff: EntityTable<Staff, 'id'>;
   sync_queue: EntityTable<SyncQueueItem, 'id'>;
   settings: EntityTable<Setting, 'key'>;
+  cash_logs: EntityTable<CashLog, 'id'>;
+  shifts: EntityTable<Shift, 'id'>;
+  branches: EntityTable<Branch, 'id'>;
+  counters: EntityTable<Counter, 'id'>;
+  inventory_ledger: EntityTable<InventoryLedgerEvent, 'id'>;
+  dlq: EntityTable<DLQItem, 'id'>;
+  pos_events: EntityTable<POSEvent, 'event_id'>;
+  snapshots: EntityTable<MaterializedSnapshot, 'id'>;
 };
 
-// Version 9 adds compound indexes for optimized auth queries
-db.version(9).stores({
-  products: 'id, businessId, name, price, costPrice, quantity, category, barcode',
-  sales: 'id, businessId, total, totalProfit, timestamp, receiptId, paymentMethod, deviceId',
-  purchases: 'id, businessId, total, timestamp',
-  expenses: 'id, businessId, timestamp, category',
-  recurring_expenses: 'id, businessId, frequency, nextRun, isActive',
-  businesses: 'id, code, name, packageId, [name+code+pin]',
-  staff: 'id, businessId, code, idNumber, phoneNumber, [businessId+code+pin]',
+db.version(19).stores({
+  products: 'id, businessId, branchId, name, price, costPrice, quantity, category, barcode, syncStatus',
+  sales: 'id, businessId, branchId, total, totalProfit, timestamp, receiptId, paymentMethod, deviceId, syncStatus',
+  purchases: 'id, businessId, branchId, total, timestamp, syncStatus',
+  expenses: 'id, businessId, branchId, timestamp, category, status, syncStatus',
+  recurring_expenses: 'id, businessId, branchId, frequency, nextRun, isActive, syncStatus',
+  businesses: 'id, code, name, packageId, [name+code+pin], syncStatus',
+  staff: 'id, businessId, branchId, code, idNumber, phoneNumber, [businessId+code+pin], syncStatus',
   sync_queue: 'id, action, table, timestamp, status, errorCount',
-  settings: 'key'
+  settings: 'key',
+  cash_logs: 'id, businessId, branchId, staffId, date, status, [businessId+date], syncStatus',
+  shifts: 'id, businessId, staffId, branchId, status, startTime, syncStatus',
+  branches: 'id, businessId, name, syncStatus',
+  counters: 'id, businessId, entityType',
+  inventory_ledger: 'id, businessId, productId, recordedAt, traceId, [productId+businessId], syncStatus',
+  dlq: 'id, businessId, tableName, failedAt',
+  pos_events: 'event_id, business_id, event_type, server_timestamp, sync_status',
+  snapshots: 'id, business_id, view_type'
 });
 
 export { db };

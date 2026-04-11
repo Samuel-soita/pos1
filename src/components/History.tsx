@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { type Sale } from '../db/db';
-import { Search, Printer, FileText, TrendingUp, Banknote, Calendar } from 'lucide-react';
+import { Search, Printer, FileText, TrendingUp, Banknote, Calendar, Receipt } from 'lucide-react';
 import { db } from '../db/db';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useAuth } from '../hooks/useAuth';
@@ -19,8 +19,6 @@ export function History() {
   const sales = useLiveQuery(async () => {
     if (!business?.id) return [];
 
-    // Optimized Fetching using useLiveQuery
-    
     if (periodFilter === 'Today') {
       const todayStart = new Date().setHours(0, 0, 0, 0);
       return await db.sales
@@ -57,6 +55,7 @@ export function History() {
 
   const totalFilteredSales = sales.reduce((sum, s) => sum + s.total, 0);
   const totalFilteredProfit = sales.reduce((sum, s) => sum + (s.totalProfit || 0), 0);
+  const totalFilteredTax = sales.reduce((sum, s) => sum + (s.taxAmount || 0), 0);
 
   const handlePrint = () => {
     window.print();
@@ -73,20 +72,27 @@ export function History() {
 
       {isOwner && (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '20px' }}>
-           <div className="card" style={{ display: 'flex', alignItems: 'center', gap: '16px', background: 'var(--bg-secondary)', borderLeft: '4px solid var(--primary)' }}>
-             <Banknote size={32} color="var(--primary)" />
-             <div>
-               <p style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-muted)' }}>Total Sales ({periodFilter})</p>
-               <h3 style={{ fontSize: '1.5rem', fontWeight: 800 }}>KES {totalFilteredSales.toLocaleString()}</h3>
-             </div>
-           </div>
-           <div className="card" style={{ display: 'flex', alignItems: 'center', gap: '16px', background: '#f0fdf4', borderLeft: '4px solid #22c55e' }}>
-             <TrendingUp size={32} color="#22c55e" />
-             <div>
-               <p style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-muted)' }}>Estimated Profit</p>
-               <h3 style={{ fontSize: '1.5rem', fontWeight: 800, color: '#15803d' }}>KES {totalFilteredProfit.toLocaleString()}</h3>
-             </div>
-           </div>
+            <div className="card" style={{ display: 'flex', alignItems: 'center', gap: '16px', background: '#f0f9ff', borderLeft: '4px solid var(--primary)' }}>
+              <Banknote size={32} color="var(--primary)" />
+              <div>
+                <p style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-muted)' }}>Total Sales</p>
+                <h3 style={{ fontSize: '1.5rem', fontWeight: 800 }}>KES {totalFilteredSales.toLocaleString()}</h3>
+              </div>
+            </div>
+            <div className="card" style={{ display: 'flex', alignItems: 'center', gap: '16px', background: '#f0fdf4', borderLeft: '4px solid #22c55e' }}>
+              <TrendingUp size={32} color="#22c55e" />
+              <div>
+                <p style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-muted)' }}>Net Profit</p>
+                <h3 style={{ fontSize: '1.5rem', fontWeight: 800, color: '#15803d' }}>KES {totalFilteredProfit.toLocaleString()}</h3>
+              </div>
+            </div>
+            <div className="card" style={{ display: 'flex', alignItems: 'center', gap: '16px', background: '#fff7ed', borderLeft: '4px solid #f97316' }}>
+              <Receipt size={32} color="#f97316" />
+              <div>
+                <p style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-muted)' }}>Tax Collected</p>
+                <h3 style={{ fontSize: '1.5rem', fontWeight: 800, color: '#c2410c' }}>KES {totalFilteredTax.toLocaleString()}</h3>
+              </div>
+            </div>
         </div>
       )}
 
@@ -161,7 +167,7 @@ export function History() {
                 <td style={{ padding: '16px 24px' }} data-label="Time">{new Date(sale.timestamp).toLocaleTimeString()}</td>
                 <td style={{ padding: '16px 24px' }} data-label="Method">
                   <span style={{ padding: '4px 8px', borderRadius: '6px', background: 'var(--bg-secondary)', fontSize: '0.75rem', fontWeight: 700 }}>
-                    {sale.paymentMethod}
+                    {sale.paymentMethod === 'Split' ? 'Multi-Payment' : (sale.paymentMethod || 'Cash')}
                   </span>
                 </td>
                 <td style={{ padding: '16px 24px', fontWeight: 800 }} data-label="Amount">KES {sale.total.toLocaleString()}</td>
@@ -190,10 +196,14 @@ export function History() {
             <div className="receipt-container" style={{ padding: '40px' }}>
               <div style={{ textAlign: 'center', marginBottom: '24px' }}>
                 <h2 style={{ fontSize: '1.75rem', fontWeight: 900, marginBottom: '4px' }}>{business?.name}</h2>
-                <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '16px' }}>Sales Receipt</div>
+                {business?.address && <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{business.address}</div>}
+                {business?.telephone && <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Tel: {business.telephone}</div>}
+                {business?.kraPin && <div style={{ fontSize: '0.85rem', fontWeight: 700, marginTop: '4px' }}>PIN: {business.kraPin}</div>}
+                
                 <div style={{ borderTop: '2px dashed var(--border)', margin: '16px 0' }}></div>
-                <p style={{ fontSize: '0.9rem' }}><strong>Receipt ID:</strong> {selectedSale.receiptId}</p>
-                <p style={{ fontSize: '0.9rem' }}><strong>Date:</strong> {new Date(selectedSale.timestamp).toLocaleString()}</p>
+                <div style={{ fontSize: '0.85rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '8px' }}>Sales Receipt</div>
+                <p style={{ fontSize: '0.9rem', margin: '2px 0' }}><strong>Receipt ID:</strong> {selectedSale.receiptId}</p>
+                <p style={{ fontSize: '0.9rem', margin: '2px 0' }}><strong>Date:</strong> {new Date(selectedSale.timestamp).toLocaleString()}</p>
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '24px' }}>
@@ -205,14 +215,42 @@ export function History() {
                 ))}
               </div>
 
-              <div style={{ borderTop: '2px solid var(--text)', paddingTop: '16px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '1.25rem', fontWeight: 900 }}>
-                  <span>TOTAL</span>
-                  <span>KES {selectedSale.total.toLocaleString()}</span>
+              <div style={{ borderTop: '2px dashed var(--border)', margin: '16px 0' }}></div>
+
+              {selectedSale.taxAmount > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginBottom: '12px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                    <span>Subtotal</span>
+                    <span>KES {(selectedSale.total - selectedSale.taxAmount).toLocaleString()}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                    <span>Tax (Inclusive {selectedSale.taxRate}%)</span>
+                    <span>KES {selectedSale.taxAmount.toLocaleString()}</span>
+                  </div>
                 </div>
-                <div style={{ fontSize: '0.85rem', textAlign: 'right', marginTop: '4px', color: 'var(--text-muted)' }}>
-                  Paid via {selectedSale.paymentMethod}
-                </div>
+              )}
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '1.25rem', fontWeight: 900 }}>
+                <span>TOTAL</span>
+                <span>KES {selectedSale.total.toLocaleString()}</span>
+              </div>
+              
+              <div style={{ marginTop: '16px', borderTop: '1px dashed var(--border)', paddingTop: '12px' }}>
+                {selectedSale.paymentMethod === 'Split' ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                    <p style={{ fontSize: '0.75rem', fontWeight: 700, margin: 0, textTransform: 'uppercase', color: 'var(--text-muted)' }}>Payment Breakdown</p>
+                    {selectedSale.splitPayments?.map((p, idx) => (
+                      <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
+                        <span>{p.method} {p.transactionCode ? `(${p.transactionCode})` : ''}</span>
+                        <span style={{ fontWeight: 600 }}>KES {p.amount.toLocaleString()}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div style={{ fontSize: '0.85rem', textAlign: 'right', color: 'var(--text-muted)' }}>
+                    Paid via {selectedSale.paymentMethod} {selectedSale.transactionCode ? `(${selectedSale.transactionCode})` : ''}
+                  </div>
+                )}
               </div>
 
               <div style={{ textAlign: 'center', marginTop: '40px', fontSize: '0.75rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>

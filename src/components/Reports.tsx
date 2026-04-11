@@ -1,12 +1,21 @@
 import { useState } from 'react';
 import { useReports, type TimeWindow } from '../hooks/useReports';
-import { BarChart3, TrendingUp, Download, PieChart, FileText } from 'lucide-react';
+import { useAuth } from '../hooks/useAuth';
+import { db } from '../db/db';
+import { useLiveQuery } from 'dexie-react-hooks';
+import { BarChart3, TrendingUp, Download, PieChart, FileText, Users, DollarSign } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 
 export function Reports() {
+  const { userType, businessId } = useAuth();
   const [timeWindow, setTimeWindow] = useState<TimeWindow>('month');
-  const { totalSales, totalProfit, topProducts, sales } = useReports(timeWindow);
+  const [selectedBranch, setSelectedBranch] = useState('');
+  const { totalSales, totalProfit, topProducts, sales, staffPerformance, trends } = useReports(timeWindow, selectedBranch);
+
+  const branches = useLiveQuery(() => 
+    businessId ? db.branches.where('businessId').equals(businessId).toArray() : []
+  , [businessId]) || [];
 
   const handleExportCSV = () => {
     if (sales.length === 0) return alert('No data to export for this period.');
@@ -104,7 +113,27 @@ export function Reports() {
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '32px', paddingBottom: '32px' }}>
+      {/* 0. Executive Daily Summary (Migrated from Dashboard) */}
+      {timeWindow === 'day' && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '20px' }}>
+          <div className="card" style={{ border: 'none', background: '#f8fafc', padding: '20px', borderLeft: '4px solid var(--primary)' }}>
+            <p style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '8px' }}>Today's Sales</p>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
+               <h2 style={{ fontSize: '1.75rem', fontWeight: 900 }}>KES {totalSales.toLocaleString()}</h2>
+               <TrendingUp size={16} color="var(--success)" />
+            </div>
+          </div>
+          <div className="card" style={{ border: 'none', background: '#f8fafc', padding: '20px', borderLeft: '4px solid var(--success)' }}>
+            <p style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '8px' }}>Today's Profit</p>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
+               <h2 style={{ fontSize: '1.75rem', fontWeight: 900 }}>KES {trends?.todayProfit.toLocaleString() || '0'}</h2>
+               <DollarSign size={16} color="var(--primary)" />
+            </div>
+          </div>
+        </div>
+      )}
+
       <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
         <div>
           <h1 style={{ fontSize: '2rem', fontWeight: 800 }}>Reporting & Analytics</h1>
@@ -131,6 +160,23 @@ export function Reports() {
           </button>
         </div>
       </header>
+
+      {userType === 'owner' && branches.length > 0 && (
+        <div style={{ display: 'flex', gap: '12px', alignItems: 'center', marginBottom: '8px' }}>
+           <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--text-muted)' }}>Location Filter:</span>
+           <select 
+             className="btn-secondary" 
+             style={{ width: 'auto', minHeight: '36px', fontSize: '0.85rem', background: 'white' }}
+             value={selectedBranch}
+             onChange={(e) => setSelectedBranch(e.target.value)}
+           >
+             <option value="">All Branches</option>
+             {branches.map(b => (
+               <option key={b.id} value={b.id}>{b.name}</option>
+             ))}
+           </select>
+        </div>
+      )}
 
       {/* KPI Cards */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: '24px' }}>
@@ -194,6 +240,37 @@ export function Reports() {
           </div>
         )}
       </div>
+
+      {/* Team Performance - Exclusive to Owners */}
+      {userType === 'owner' && (
+        <div className="card">
+          <h3 style={{ marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Users size={20} color="var(--primary)" />
+            Team Performance (Leaderboard)
+          </h3>
+          
+          {staffPerformance.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '32px', color: 'var(--text-muted)' }}>
+              No staff performance data available.
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px' }}>
+              {staffPerformance.map((staff, idx) => (
+                <div key={idx} style={{ padding: '16px', background: 'var(--background)', borderRadius: '12px', border: '1px solid var(--border)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                    <span style={{ fontWeight: 700 }}>{staff.firstName} {staff.lastName}</span>
+                    <span style={{ fontSize: '0.75rem', padding: '2px 8px', background: 'var(--primary)', color: 'white', borderRadius: '12px' }}>#{idx+1}</span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem' }}>
+                    <span style={{ color: 'var(--text-muted)' }}>{staff.salesCount} sales</span>
+                    <span style={{ fontWeight: 800 }}>KES {staff.revenue.toLocaleString()}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

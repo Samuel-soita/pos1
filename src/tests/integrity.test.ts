@@ -75,6 +75,10 @@ describe('SMUTA PAY - Business Logic Integrity', () => {
         totalProfit: 100,
         timestamp: Date.now(),
         receiptId: 'REC-TEST',
+        taxRate: 16,
+        taxAmount: 40,
+        paymentMethod: 'Cash',
+        deviceId: 'TEST-DEVICE-001',
         items: [{ productId, name: 'Atomicity Item', quantity: sellQty, price: 50, costPrice: 30 }]
       };
       
@@ -139,8 +143,11 @@ describe('SMUTA PAY - Business Logic Integrity', () => {
       totalProfit: 200,
       timestamp: Date.now(),
       receiptId: 'REC-MPESA',
-      items: [],
+      taxRate: 16,
+      taxAmount: 80,
       paymentMethod: 'M-Pesa',
+      deviceId: 'TEST-DEVICE-001',
+      items: [],
       transactionCode: mpesaCode
     });
 

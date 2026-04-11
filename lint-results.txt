@@ -1,0 +1,243 @@
+
+> pos1@0.0.0 lint
+> eslint .
+
+
+/home/samuel-soita/Development/code/money/pos1/src/components/Expenses.tsx
+   31:36  error    Compilation Skipped: Existing memoization could not be preserved
+
+React Compiler has skipped optimizing this component because the existing manual memoization could not be preserved. The inferred dependencies did not match the manually specified dependencies, which could cause the value to change more or less frequently than expected. The inferred dependency was `businessId`, but the source dependencies were []. Inferred dependency not present in source.
+
+/home/samuel-soita/Development/code/money/pos1/src/components/Expenses.tsx:31:36
+  29 |   const pendingCount = useLiveQuery(() => db.expenses.where('status').equals('pending').count()) || 0;
+  30 |
+> 31 |   const handleVerify = useCallback(async (id: string, status: 'verified' | 'rejected') => {
+     |                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 32 |     const now = Date.now();
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 33 |     await db.expenses.update(id, { 
+     …
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 48 |     });
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 49 |   }, []);
+     | ^^^^ Could not preserve existing manual memoization
+  50 |
+  51 |   const handleDelete = useCallback(async (id: string) => {
+  52 |     if (confirm('Are you sure you want to delete this expense?')) {  react-hooks/preserve-manual-memoization
+   31:36  error    Compilation Skipped: Existing memoization could not be preserved
+
+React Compiler has skipped optimizing this component because the existing manual memoization could not be preserved. The inferred dependencies did not match the manually specified dependencies, which could cause the value to change more or less frequently than expected. The inferred dependency was `business`, but the source dependencies were []. Inferred dependency not present in source.
+
+/home/samuel-soita/Development/code/money/pos1/src/components/Expenses.tsx:31:36
+  29 |   const pendingCount = useLiveQuery(() => db.expenses.where('status').equals('pending').count()) || 0;
+  30 |
+> 31 |   const handleVerify = useCallback(async (id: string, status: 'verified' | 'rejected') => {
+     |                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 32 |     const now = Date.now();
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 33 |     await db.expenses.update(id, { 
+     …
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 48 |     });
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 49 |   }, []);
+     | ^^^^ Could not preserve existing manual memoization
+  50 |
+  51 |   const handleDelete = useCallback(async (id: string) => {
+  52 |     if (confirm('Are you sure you want to delete this expense?')) {    react-hooks/preserve-manual-memoization
+   49:6   warning  React Hook useCallback has missing dependencies: 'business' and 'businessId'. Either include them or remove the dependency array                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      react-hooks/exhaustive-deps
+   51:36  error    Compilation Skipped: Existing memoization could not be preserved
+
+React Compiler has skipped optimizing this component because the existing manual memoization could not be preserved. The inferred dependencies did not match the manually specified dependencies, which could cause the value to change more or less frequently than expected. The inferred dependency was `businessId`, but the source dependencies were []. Inferred dependency not present in source.
+
+/home/samuel-soita/Development/code/money/pos1/src/components/Expenses.tsx:51:36
+  49 |   }, []);
+  50 |
+> 51 |   const handleDelete = useCallback(async (id: string) => {
+     |                                    ^^^^^^^^^^^^^^^^^^^^^^^
+> 52 |     if (confirm('Are you sure you want to delete this expense?')) {
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 53 |       const now = Date.now();
+     …
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 65 |     }
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 66 |   }, []);
+     | ^^^^ Could not preserve existing manual memoization
+  67 |
+  68 |   if (!isOwner) {
+  69 |     return <QuickLog businessId={businessId || ''} />;                                                               react-hooks/preserve-manual-memoization
+   51:36  error    Compilation Skipped: Existing memoization could not be preserved
+
+React Compiler has skipped optimizing this component because the existing manual memoization could not be preserved. The inferred dependencies did not match the manually specified dependencies, which could cause the value to change more or less frequently than expected. The inferred dependency was `business`, but the source dependencies were []. Inferred dependency not present in source.
+
+/home/samuel-soita/Development/code/money/pos1/src/components/Expenses.tsx:51:36
+  49 |   }, []);
+  50 |
+> 51 |   const handleDelete = useCallback(async (id: string) => {
+     |                                    ^^^^^^^^^^^^^^^^^^^^^^^
+> 52 |     if (confirm('Are you sure you want to delete this expense?')) {
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 53 |       const now = Date.now();
+     …
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 65 |     }
+     | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 66 |   }, []);
+     | ^^^^ Could not preserve existing manual memoization
+  67 |
+  68 |   if (!isOwner) {
+  69 |     return <QuickLog businessId={businessId || ''} />;                                                                 react-hooks/preserve-manual-memoization
+   66:6   warning  React Hook useCallback has missing dependencies: 'business' and 'businessId'. Either include them or remove the dependency array                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      react-hooks/exhaustive-deps
+  217:26  error    React Hook "useAuth" is called in function "handleSubmit" that is neither a React function component nor a custom React Hook function. React component names must start with an uppercase letter. React Hook names must start with the word "use"                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     react-hooks/rules-of-hooks
+  314:26  error    React Hook "useAuth" is called in function "handleSubmit" that is neither a React function component nor a custom React Hook function. React component names must start with an uppercase letter. React Hook names must start with the word "use"                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     react-hooks/rules-of-hooks
+  417:26  error    React Hook "useAuth" is called in function "handleAdd" that is neither a React function component nor a custom React Hook function. React component names must start with an uppercase letter. React Hook names must start with the word "use"                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        react-hooks/rules-of-hooks
+  450:26  error    React Hook "useAuth" cannot be called inside a callback. React Hooks must be called in a React function component or a custom React Hook function                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     react-hooks/rules-of-hooks
+  463:6   warning  React Hook useCallback has a missing dependency: 'businessId'. Either include it or remove the dependency array                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       react-hooks/exhaustive-deps
+
+/home/samuel-soita/Development/code/money/pos1/src/components/Inventory.tsx
+   13:54  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  122:21  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/home/samuel-soita/Development/code/money/pos1/src/components/SyncDashboard.tsx
+  32:32  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/home/samuel-soita/Development/code/money/pos1/src/db/db.ts
+  180:12  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+/home/samuel-soita/Development/code/money/pos1/src/hooks/useReports.ts
+   15:75  error    Compilation Skipped: Existing memoization could not be preserved
+
+React Compiler has skipped optimizing this component because the existing manual memoization could not be preserved. The inferred dependencies did not match the manually specified dependencies, which could cause the value to change more or less frequently than expected. The inferred dependency was `userType`, but the source dependencies were [queryResult, timeWindow]. Inferred different dependency than source.
+
+/home/samuel-soita/Development/code/money/pos1/src/hooks/useReports.ts:15:75
+   13 |   }, [businessId]);
+   14 |
+>  15 |   const { sales, totalSales, totalProfit, topProducts, trends } = useMemo(() => {
+      |                                                                           ^^^^^^^
+>  16 |     const allSales = queryResult || [];
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+>  17 |     const now = new Date();
+      …
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 101 |     };
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 102 |   }, [queryResult, timeWindow]);
+      | ^^^^ Could not preserve existing manual memoization
+  103 |
+  104 |   return {
+  105 |     sales,      react-hooks/preserve-manual-memoization
+   15:75  error    Compilation Skipped: Existing memoization could not be preserved
+
+React Compiler has skipped optimizing this component because the existing manual memoization could not be preserved. The inferred dependencies did not match the manually specified dependencies, which could cause the value to change more or less frequently than expected. The inferred dependency was `userBranchId`, but the source dependencies were [queryResult, timeWindow]. Inferred different dependency than source.
+
+/home/samuel-soita/Development/code/money/pos1/src/hooks/useReports.ts:15:75
+   13 |   }, [businessId]);
+   14 |
+>  15 |   const { sales, totalSales, totalProfit, topProducts, trends } = useMemo(() => {
+      |                                                                           ^^^^^^^
+>  16 |     const allSales = queryResult || [];
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+>  17 |     const now = new Date();
+      …
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 101 |     };
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 102 |   }, [queryResult, timeWindow]);
+      | ^^^^ Could not preserve existing manual memoization
+  103 |
+  104 |   return {
+  105 |     sales,  react-hooks/preserve-manual-memoization
+   15:75  error    Compilation Skipped: Existing memoization could not be preserved
+
+React Compiler has skipped optimizing this component because the existing manual memoization could not be preserved. The inferred dependencies did not match the manually specified dependencies, which could cause the value to change more or less frequently than expected. The inferred dependency was `branchFilter`, but the source dependencies were [queryResult, timeWindow]. Inferred different dependency than source.
+
+/home/samuel-soita/Development/code/money/pos1/src/hooks/useReports.ts:15:75
+   13 |   }, [businessId]);
+   14 |
+>  15 |   const { sales, totalSales, totalProfit, topProducts, trends } = useMemo(() => {
+      |                                                                           ^^^^^^^
+>  16 |     const allSales = queryResult || [];
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+>  17 |     const now = new Date();
+      …
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 101 |     };
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 102 |   }, [queryResult, timeWindow]);
+      | ^^^^ Could not preserve existing manual memoization
+  103 |
+  104 |   return {
+  105 |     sales,  react-hooks/preserve-manual-memoization
+   15:75  error    Compilation Skipped: Existing memoization could not be preserved
+
+React Compiler has skipped optimizing this component because the existing manual memoization could not be preserved. The inferred dependencies did not match the manually specified dependencies, which could cause the value to change more or less frequently than expected. The inferred dependency was `userType`, but the source dependencies were [queryResult, timeWindow]. Inferred different dependency than source.
+
+/home/samuel-soita/Development/code/money/pos1/src/hooks/useReports.ts:15:75
+   13 |   }, [businessId]);
+   14 |
+>  15 |   const { sales, totalSales, totalProfit, topProducts, trends } = useMemo(() => {
+      |                                                                           ^^^^^^^
+>  16 |     const allSales = queryResult || [];
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+>  17 |     const now = new Date();
+      …
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 101 |     };
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 102 |   }, [queryResult, timeWindow]);
+      | ^^^^ Could not preserve existing manual memoization
+  103 |
+  104 |   return {
+  105 |     sales,      react-hooks/preserve-manual-memoization
+   15:75  error    Compilation Skipped: Existing memoization could not be preserved
+
+React Compiler has skipped optimizing this component because the existing manual memoization could not be preserved. The inferred dependencies did not match the manually specified dependencies, which could cause the value to change more or less frequently than expected. The inferred dependency was `userBranchId`, but the source dependencies were [queryResult, timeWindow]. Inferred different dependency than source.
+
+/home/samuel-soita/Development/code/money/pos1/src/hooks/useReports.ts:15:75
+   13 |   }, [businessId]);
+   14 |
+>  15 |   const { sales, totalSales, totalProfit, topProducts, trends } = useMemo(() => {
+      |                                                                           ^^^^^^^
+>  16 |     const allSales = queryResult || [];
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+>  17 |     const now = new Date();
+      …
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 101 |     };
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 102 |   }, [queryResult, timeWindow]);
+      | ^^^^ Could not preserve existing manual memoization
+  103 |
+  104 |   return {
+  105 |     sales,  react-hooks/preserve-manual-memoization
+   15:75  error    Compilation Skipped: Existing memoization could not be preserved
+
+React Compiler has skipped optimizing this component because the existing manual memoization could not be preserved. The inferred dependencies did not match the manually specified dependencies, which could cause the value to change more or less frequently than expected. The inferred dependency was `branchFilter`, but the source dependencies were [queryResult, timeWindow]. Inferred different dependency than source.
+
+/home/samuel-soita/Development/code/money/pos1/src/hooks/useReports.ts:15:75
+   13 |   }, [businessId]);
+   14 |
+>  15 |   const { sales, totalSales, totalProfit, topProducts, trends } = useMemo(() => {
+      |                                                                           ^^^^^^^
+>  16 |     const allSales = queryResult || [];
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+>  17 |     const now = new Date();
+      …
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 101 |     };
+      | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+> 102 |   }, [queryResult, timeWindow]);
+      | ^^^^ Could not preserve existing manual memoization
+  103 |
+  104 |   return {
+  105 |     sales,  react-hooks/preserve-manual-memoization
+  102:6   warning  React Hook useMemo has missing dependencies: 'branchFilter', 'userBranchId', and 'userType'. Either include them or remove the dependency array                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          react-hooks/exhaustive-deps
+
+/home/samuel-soita/Development/code/money/pos1/src/utils/verifyIsolation.ts
+  14:37  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+  15:42  error  Unexpected any. Specify a different type  @typescript-eslint/no-explicit-any
+
+✖ 24 problems (20 errors, 4 warnings)
+

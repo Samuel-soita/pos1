@@ -1,40 +1,62 @@
 import { useState } from 'react';
 import { useAuth } from '../hooks/useAuth';
-import { Lock, ArrowRight, Store, ShieldCheck, Phone, Cpu } from 'lucide-react';
+import { useShifts } from '../hooks/useShifts';
+import { Lock, ArrowRight, Store, ShieldCheck, Phone, Cpu, Mail, Globe } from 'lucide-react';
 
 export function AuthScreen() {
-  const { businessLogin, staffLogin, engineerSetup } = useAuth();
-  const [authMode, setAuthMode] = useState<'business' | 'staff' | 'engineer'>('business');
+  const { businessLogin, staffLogin, provisionBusiness } = useAuth();
+  const { startShift } = useShifts();
+  const [authMode, setAuthMode] = useState<'business' | 'staff' | 'provisioning'>('business');
   
   // Field States
   const [businessName, setBusinessName] = useState('');
   const [businessCode, setBusinessCode] = useState('');
+  const [ownerEmail, setOwnerEmail] = useState('');
   const [staffCode, setStaffCode] = useState('');
   const [pin, setPin] = useState('');
+  const [activationToken, setActivationToken] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [customFeatures, setCustomFeatures] = useState(0);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setLoading(true);
 
+    let success = false;
     try {
       if (authMode === 'business') {
-        await businessLogin(businessName, businessCode, pin);
+        await businessLogin(businessCode, pin);
+        success = true;
       } else if (authMode === 'staff') {
-        await staffLogin(businessCode, staffCode, pin);
-      } else if (authMode === 'engineer') {
-        await engineerSetup(businessName, businessCode, pin, customFeatures);
+        await staffLogin(staffCode, pin);
+        success = true;
+      } else if (authMode === 'provisioning') {
+        const newBiz = await provisionBusiness(activationToken, businessName, pin, ownerEmail);
         setAuthMode('business');
-        setError('Business Successfully Registered! You can now login.');
+        setBusinessCode(newBiz.code); // Pre-fill for convenience
+        setPin(''); // Require PIN to be entered again
+        setError(`🎉 Provisioning Successful! Store Code is: ${newBiz.code}. Please log in.`);
+        success = false; // Prevents direct entry
       }
-    } catch (err: unknown) {
-      const error = err as Error;
-      setError(error.message || 'Authentication failed');
+    } catch (err: any) {
+      console.error('Auth Error Details:', err);
+      // Surface the specific Supabase error message if available
+      const msg = err.message || err.error_description || 'Authentication failed';
+      
+      if (msg.includes('Email not confirmed')) {
+        setError('❌ Access Denied: Please check your email and confirm your account, or disable "Confirm Email" in Supabase settings.');
+      } else if (msg.includes('invalid_credentials')) {
+        setError('❌ Invalid Email or PIN. Please check your credentials.');
+      } else {
+        setError(`❌ ${msg}`);
+      }
     } finally {
       setLoading(false);
+    }
+    
+    if (success && authMode === 'staff') {
+      await startShift();
     }
   };
 
@@ -44,14 +66,14 @@ export function AuthScreen() {
         
         {/* Logo Section */}
         <div style={{ textAlign: 'center', marginBottom: '32px' }}>
-          <div className="auth-logo-container" onDoubleClick={() => setAuthMode('engineer')}>
+          <div className="auth-logo-container">
             <img src="/POS1.jpg" alt="SMUTA PAY" className="auth-logo" />
           </div>
           <h1 className="brand-shimmer" style={{ fontSize: '2.5rem', fontWeight: 900, letterSpacing: '-1px' }}>
             SMUTA PAY
           </h1>
           <p style={{ color: 'rgba(255,255,255,0.8)', fontSize: '1.1rem', marginTop: '8px', fontWeight: 500 }}>
-            {authMode === 'business' ? 'Business Owner Login' : authMode === 'staff' ? 'Staff Login' : 'System Engineer Setup'}
+            {authMode === 'business' ? 'Business Owner login' : authMode === 'staff' ? 'Staff Login' : 'System Provisioning'}
           </p>
         </div>
 
@@ -59,7 +81,7 @@ export function AuthScreen() {
         <div className="card glass-card" style={{ padding: '40px', border: 'none' }}>
           
           {/* Mode Switcher */}
-          {authMode !== 'engineer' && (
+          {authMode !== 'provisioning' && (
             <div style={{ display: 'flex', gap: '8px', marginBottom: '32px', background: 'rgba(0,0,0,0.05)', padding: '4px', borderRadius: '12px' }}>
               <button 
                 onClick={() => setAuthMode('business')}
@@ -94,12 +116,12 @@ export function AuthScreen() {
             </div>
           )}
 
-          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+          <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
             {error && (
               <div style={{ 
                 padding: '14px', 
-                background: error.includes('Registered') ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)', 
-                color: error.includes('Registered') ? '#065f46' : '#991b1b', 
+                background: error.includes('Success') ? 'rgba(16, 185, 129, 0.2)' : 'rgba(239, 68, 68, 0.2)', 
+                color: error.includes('Success') ? '#065f46' : '#991b1b', 
                 borderRadius: '12px', 
                 fontSize: '0.9rem',
                 fontWeight: 600,
@@ -110,47 +132,83 @@ export function AuthScreen() {
               </div>
             )}
             
-            {/* Input Groups */}
-            <div className="input-group" style={{ marginBottom: 0 }}>
-              <label style={{ color: 'var(--text)', fontWeight: 700 }}>Business Name</label>
-              <div className="input-icon-wrapper">
-                <input 
-                  required 
-                  type="text" 
-                  className="input-with-icon"
-                  placeholder="e.g. My Hardware Store"
-                  value={businessName} 
-                  onChange={e => setBusinessName(e.target.value)} 
-                />
-                <Store className="input-icon" size={20} />
-              </div>
-            </div>
+            {/* --- PROVISIONING FIELDS --- */}
+            {authMode === 'provisioning' && (
+              <>
+                <div className="input-group">
+                  <label style={{ fontWeight: 700 }}>Activation Token</label>
+                  <div className="input-icon-wrapper">
+                    <input 
+                      required 
+                      type="text" 
+                      placeholder="XXXX-XXXX-XXXX"
+                      value={activationToken} 
+                      onChange={e => setActivationToken(e.target.value)} 
+                    />
+                    <ShieldCheck className="input-icon" size={20} />
+                  </div>
+                </div>
+                <div className="input-group">
+                  <label style={{ fontWeight: 700 }}>Business Name</label>
+                  <div className="input-icon-wrapper">
+                    <input 
+                      required 
+                      type="text" 
+                      placeholder="e.g. Acme Stores"
+                      value={businessName} 
+                      onChange={e => setBusinessName(e.target.value)} 
+                    />
+                    <Store className="input-icon" size={20} />
+                  </div>
+                </div>
+              </>
+            )}
 
-            <div className="input-group" style={{ marginBottom: 0 }}>
-              <label style={{ color: 'var(--text)', fontWeight: 700 }}>Business Code</label>
-              <div className="input-icon-wrapper">
-                <input 
-                  required 
-                  type="text" 
-                  maxLength={4}
-                  className="input-with-icon"
-                  placeholder="0001"
-                  value={businessCode} 
-                  onChange={e => setBusinessCode(e.target.value)} 
-                />
-                <ShieldCheck className="input-icon" size={20} />
+            {/* --- COMMON FIELDS (Owner/Provisioning) --- */}
+            {/* --- BUSINESS LOGIN FIELD --- */}
+            {authMode === 'business' && (
+              <div className="input-group">
+                <label style={{ fontWeight: 700 }}>Business Code</label>
+                <div className="input-icon-wrapper">
+                  <input 
+                    required 
+                    type="text" 
+                    maxLength={4}
+                    placeholder="0001"
+                    value={businessCode} 
+                    onChange={e => setBusinessCode(e.target.value)} 
+                  />
+                  <Globe className="input-icon" size={20} />
+                </div>
               </div>
-            </div>
+            )}
 
+            {/* --- PROVISIONING EMAIL FIELD --- */}
+            {authMode === 'provisioning' && (
+              <div className="input-group">
+                <label style={{ fontWeight: 700 }}>Owner Email</label>
+                <div className="input-icon-wrapper">
+                  <input 
+                    required 
+                    type="email" 
+                    placeholder="owner@example.com"
+                    value={ownerEmail} 
+                    onChange={e => setOwnerEmail(e.target.value)} 
+                  />
+                  <Mail className="input-icon" size={20} />
+                </div>
+              </div>
+            )}
+
+            {/* --- STAFF FIELDS --- */}
             {authMode === 'staff' && (
-              <div className="input-group" style={{ marginBottom: 0 }}>
-                <label style={{ color: 'var(--text)', fontWeight: 700 }}>Staff Code</label>
+              <div className="input-group">
+                <label style={{ fontWeight: 700 }}>Staff Code</label>
                 <div className="input-icon-wrapper">
                   <input 
                     required 
                     type="text" 
                     maxLength={3}
-                    className="input-with-icon"
                     placeholder="001"
                     value={staffCode} 
                     onChange={e => setStaffCode(e.target.value)} 
@@ -159,36 +217,17 @@ export function AuthScreen() {
                 </div>
               </div>
             )}
-
-            {authMode === 'engineer' && (
-              <div className="input-group" style={{ marginBottom: 0 }}>
-                <label style={{ color: 'var(--text)', fontWeight: 700 }}>Add-on Features (KES 200/mo each)</label>
-                <div className="input-icon-wrapper">
-                  <input 
-                    type="number" 
-                    min={0}
-                    max={10}
-                    className="input-with-icon"
-                    placeholder="0"
-                    value={customFeatures} 
-                    onChange={e => setCustomFeatures(parseInt(e.target.value) || 0)} 
-                  />
-                  <ShieldCheck className="input-icon" size={20} />
-                </div>
-              </div>
-            )}
             
-            <div className="input-group" style={{ marginBottom: 0 }}>
-              <label style={{ color: 'var(--text)', fontWeight: 700 }}>
-                {authMode === 'engineer' ? 'Engineer Tech Code' : '4-Digit PIN'}
+            <div className="input-group">
+              <label style={{ fontWeight: 700 }}>
+                {authMode === 'provisioning' ? 'Set Owner 4-Digit PIN' : '4-Digit PIN'}
               </label>
               <div className="input-icon-wrapper">
                 <input 
                   required 
                   type="password" 
                   maxLength={4}
-                  className="input-with-icon"
-                  placeholder={authMode === 'engineer' ? '0000' : '••••'}
+                  placeholder="••••"
                   value={pin} 
                   onChange={e => setPin(e.target.value.replace(/\D/g, ''))} 
                 />
@@ -198,7 +237,7 @@ export function AuthScreen() {
 
             <button type="submit" className="btn-primary" disabled={loading} style={{ 
               height: '64px',
-              fontSize: '1.25rem',
+              fontSize: '1.2rem',
               boxShadow: '0 10px 15px -3px rgba(37, 99, 235, 0.3)',
               marginTop: '8px'
             }}>
@@ -208,44 +247,38 @@ export function AuthScreen() {
                 </span>
               ) : (
                 <>
-                  {authMode === 'engineer' ? 'Complete Tech Setup' : 'Enter Dashboard'}
+                  {authMode === 'provisioning' ? 'Activate & Provision Store' : 'Enter Dashboard'}
                   <ArrowRight size={22} />
                 </>
               )}
             </button>
           </form>
 
-          {authMode === 'engineer' && (
-            <button 
-              onClick={() => setAuthMode('business')}
-              style={{ marginTop: '20px', width: '100%', background: 'transparent', color: 'var(--text-muted)', fontWeight: 600 }}
-            >
-              Cancel Setup
-            </button>
-          )}
-
           <div style={{ marginTop: '32px', textAlign: 'center' }}>
-            <p style={{ color: 'var(--text-muted)', fontWeight: 500 }}>
-              {authMode === 'staff' ? "Switch to Business Owner Access" : "Staff Member? Login here"}
-              <button 
-                type="button" 
-                onClick={() => setAuthMode(authMode === 'business' ? 'staff' : 'business')} 
-                style={{ 
-                  background: 'transparent', 
-                  padding: '0 8px', 
-                  color: 'var(--primary)', 
-                  fontWeight: 800
-                }}
-              >
-                {authMode === 'business' ? 'Staff Login' : 'Owner Login'}
-              </button>
-            </p>
+             {authMode === 'provisioning' ? (
+               <button 
+                 onClick={() => setAuthMode('business')} 
+                 style={{ background: 'transparent', color: 'var(--text-muted)', fontWeight: 600 }}
+               >
+                 Cancel Provisioning
+               </button>
+             ) : (
+               <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+                 New device setup? 
+                 <button 
+                   onClick={() => setAuthMode('provisioning')} 
+                   style={{ background: 'transparent', padding: '0 8px', color: 'var(--primary)', fontWeight: 800 }}
+                 >
+                   Admin Provisioning
+                 </button>
+               </p>
+             )}
           </div>
         </div>
 
-        {/* Footer */}
+        {/* Support Link */}
         <p style={{ textAlign: 'center', marginTop: '40px', color: 'rgba(255,255,255,0.6)', fontSize: '0.875rem', fontWeight: 600 }}>
-          &copy; {new Date().getFullYear()} SMUTA PAY. Technical Engineer Auth Enabled.
+          &copy; {new Date().getFullYear()} SMUTA PAY. Robust Multi-Tenant POS.
         </p>
       </div>
     </div>

@@ -5,20 +5,22 @@ import { useAuth } from '../hooks/useAuth';
 import { Check, Sparkles, Zap, Shield, Store, LayoutGrid, Users } from 'lucide-react';
 
 export function PackageSelection({ isEmbedded = false, onComplete }: { isEmbedded?: boolean, onComplete?: () => void }) {
-  const { packages } = useSubscription();
+  const { packages, status: subStatus, trialUsed } = useSubscription();
   const { business } = useAuth();
 
-  const handleSelect = useCallback(async (packageId: 'hustler' | 'biashara' | 'boss') => {
-    if (!business) return;
+  const handleSelect = useCallback(async (packageId: string) => {
+    if (!business || trialUsed) return;
     try {
       // Start a 5-day trial upon selection
       const TRIAL_DAYS = 5;
       const expiryDate = new Date().getTime() + TRIAL_DAYS * 24 * 60 * 60 * 1000;
       await db.businesses.update(business.id, { 
         packageId,
-        expiryDate 
+        expiryDate,
+        status: 'trial',
+        trialUsed: true
       });
-      alert(`${packages[packageId].name} activated for a 5-day trial!`);
+      alert(`${(packages as Record<string, any>)[packageId]?.name} activated for your one-time 5-day trial!`);
       if (onComplete) {
         onComplete();
       } else {
@@ -121,6 +123,11 @@ export function PackageSelection({ isEmbedded = false, onComplete }: { isEmbedde
 
             <div style={{ marginBottom: '20px' }}>
               <h2 style={{ fontSize: '1.25rem', fontWeight: 800, marginBottom: '4px' }}>{pkg.name}</h2>
+              <p style={{ fontSize: '0.8rem', color: 'var(--primary)', fontWeight: 700, marginBottom: '12px' }}>
+                {id === 'hustler' ? "Sell fast, track money, simple shop" : 
+                 id === 'growth' ? "Manage staff, track branches, control expenses" : 
+                 "Run your entire business remotely with analytics"}
+              </p>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
                 <span style={{ fontSize: '1.75rem', fontWeight: 900 }}>KES {pkg.price}</span>
                 <span style={{ color: 'var(--text-muted)', fontWeight: 600, fontSize: '0.8rem' }}>/mo</span>
@@ -160,17 +167,21 @@ export function PackageSelection({ isEmbedded = false, onComplete }: { isEmbedde
             </div>
 
             <button 
-              onClick={() => handleSelect(id as 'hustler' | 'biashara' | 'boss')}
-              className={id === 'biashara' ? 'btn-primary' : 'btn-secondary'}
+              onClick={() => handleSelect(id)}
+              disabled={trialUsed && subStatus !== 'active'}
+              className={id === 'growth' ? 'btn-primary' : 'btn-secondary'}
               style={{ 
                 width: '100%', 
                 height: '48px', 
                 fontSize: '1rem', 
                 fontWeight: 800, 
-                borderRadius: '12px' 
+                borderRadius: '12px',
+                opacity: (trialUsed && subStatus !== 'active') ? 0.6 : 1
               }}
             >
-              Start 5-Day Trial
+              {subStatus === 'pending_payment' ? "Confirming..." : 
+               trialUsed ? (subStatus === 'active' ? "Active Plan" : "Contact Engineer") : 
+               "Start 5-Day Trial"}
             </button>
           </div>
         ))}

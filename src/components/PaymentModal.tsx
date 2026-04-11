@@ -60,7 +60,7 @@ export function PaymentModal({ status, needsDeposit }: PaymentModalProps) {
     }
   };
 
-  if (status !== 'locked' && !isSent) return null;
+  if (status !== 'suspended' && !isSent) return null;
 
   return (
     <div style={{ 

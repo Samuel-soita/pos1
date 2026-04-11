@@ -17,8 +17,10 @@ export function useRecurringExpenses() {
             title: item.title,
             amount: item.amount,
             category: item.category,
+            description: `Auto-generated from recurring template: ${item.title}`,
+            status: 'verified' as const,
             timestamp: now,
-            isRecurring: true
+            branchId: item.branchId
           };
 
           await db.expenses.add(newExpense);

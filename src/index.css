@@ -527,3 +527,209 @@ input:focus {
   from { opacity: 0; transform: translateY(20px); }
   to { opacity: 1; transform: translateY(0); }
 }
+
+/* Trend & Performance Badges */
+.trend-badge {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 20px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+  position: relative;
+  overflow: hidden;
+}
+
+.trend-badge::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.4),
+    transparent
+  );
+  animation: shimmer-badge 3s infinite;
+}
+
+@keyframes shimmer-badge {
+  0% { left: -100%; }
+  20% { left: 100%; }
+  100% { left: 100%; }
+}
+
+/* High-Performance Polish Layer */
+.vault-blur {
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  background: rgba(255, 255, 255, 0.4);
+  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes item-glow {
+  0% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.6); transform: scale(1); }
+  50% { box-shadow: 0 0 20px 10px rgba(37, 99, 235, 0.2); transform: scale(1.02); }
+  100% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0); transform: scale(1); }
+}
+
+.item-glow-trigger {
+  animation: item-glow 0.4s ease-out;
+}
+
+@keyframes total-pulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.1); color: var(--primary); }
+  100% { transform: scale(1); }
+}
+
+.total-pulse-trigger {
+  display: inline-block;
+  animation: total-pulse 0.3s ease-out;
+}
+
+.confidence-strip {
+  background: #f8fafc;
+  border-top: 1px solid var(--border);
+  padding: 12px 20px;
+  display: flex;
+  justify-content: space-around;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--secondary);
+}
+
+.confidence-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.confidence-check {
+  color: var(--success);
+}
+
+/* First Sale Celebration */
+.celebration-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(8px);
+  z-index: 10000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 40px;
+  animation: auth-fade 0.6s ease-out;
+}
+/* Hub & Premium System Design */
+.hub-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 20px;
+}
+
+@media (max-width: 1024px) {
+  .hub-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 640px) {
+  .hub-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+  }
+}
+
+.hub-card {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  padding: 20px;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: white;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  cursor: pointer;
+  min-height: 150px;
+}
+
+@media (max-width: 640px) {
+  .hub-card {
+    padding: 16px;
+    min-height: 130px;
+    border-radius: 16px;
+  }
+}
+
+.hub-card:hover {
+  transform: translateY(-8px);
+  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+}
+
+.hub-card:active {
+  transform: scale(0.96);
+}
+
+.hub-card-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 16px;
+  background: rgba(255, 255, 255, 0.9);
+  box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
+  transition: transform 0.3s ease;
+}
+
+.hub-card:hover .hub-card-icon {
+  transform: scale(1.1) rotate(-5deg);
+}
+
+.hub-card-title {
+  font-size: 1.15rem;
+  font-weight: 800;
+  margin-bottom: 4px;
+  color: inherit;
+}
+
+.hub-card-desc {
+  font-size: 0.85rem;
+  opacity: 0.8;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+/* Specific Card Gradients */
+.card-gradient-primary { background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); color: white; }
+.card-gradient-success { background: linear-gradient(135deg, #10b981 0%, #059669 100%); color: white; }
+.card-gradient-warning { background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); color: white; }
+.card-gradient-danger { background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); color: white; }
+.card-gradient-indigo { background: linear-gradient(135deg, #6366f1 0%, #4338ca 100%); color: white; }
+.card-gradient-slate { background: linear-gradient(135deg, #475569 0%, #1e293b 100%); color: white; }
+.card-gradient-amber { background: linear-gradient(135deg, #fbbf24 0%, #d97706 100%); color: white; }
+.card-gradient-rose { background: linear-gradient(135deg, #f43f5e 0%, #e11d48 100%); color: white; }
+
+.glass-shift-banner {
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.5);
+  box-shadow: 0 4px 15px rgba(0,0,0,0.05);
+  border-radius: 20px;
+  padding: 24px;
+}

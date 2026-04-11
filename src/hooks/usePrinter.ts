@@ -81,7 +81,7 @@ export function usePrinter() {
     }
   };
 
-  const printReceipt = useCallback(async (sale: Sale, businessName: string = 'Store') => {
+  const printReceipt = useCallback(async (sale: Sale, business: { name: string; address?: string; telephone?: string; kraPin?: string }) => {
     if (!device) {
       console.warn("No device paired. Skipping bluetooth print.");
       return;
@@ -95,8 +95,14 @@ export function usePrinter() {
       const encoder = new EscPosEncoder();
       encoder.initialize();
       encoder.align('center');
-      encoder.bold(true).text(businessName).newline();
-      encoder.bold(false).text('SMUTA PAY RECEIPT').newline(2);
+      encoder.bold(true).text(business?.name || 'Store').newline();
+      encoder.bold(false);
+      
+      if (business?.address) encoder.text(business.address).newline();
+      if (business?.telephone) encoder.text(`Tel: ${business.telephone}`).newline();
+      if (business?.kraPin) encoder.text(`PIN: ${business.kraPin}`).newline();
+      
+      encoder.bold(true).text('SMUTA PAY RECEIPT').bold(false).newline(2);
 
       encoder.align('left');
       encoder.text(`Date: ${new Date(sale.timestamp).toLocaleString()}`).newline();
