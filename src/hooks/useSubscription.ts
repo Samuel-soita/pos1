@@ -67,7 +67,7 @@ export function useSubscription() {
     hustler: { 
       name: 'Hustler Plan', 
       price: 500, 
-      features: ['Basic POS', 'Offline Mode', 'Single User', 'Manual Reports'] 
+      features: ['Basic POS', 'Offline Mode', 'Single User', 'Receipt Printing'] 
     },
     biashara: { 
       name: 'Biashara Plan', 
@@ -77,7 +77,7 @@ export function useSubscription() {
     boss: { 
       name: 'Boss Plan', 
       price: 3500, 
-      features: ['Pro Analytics', 'Multi-branch Sync', 'Custom Features', 'Priority Support'] 
+      features: ['Pro Analytics', 'Multi-branch Sync', 'Receipt Printing', 'Priority Support'] 
     }
   };
 

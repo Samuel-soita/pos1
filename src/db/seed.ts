@@ -12,18 +12,19 @@ export async function seedDatabase() {
 
     const businessId = crypto.randomUUID();
     
-    // 1. Seed Business
+    // 1. Seed Business (No packageId to trigger the selection flow)
     await db.businesses.add({
       id: businessId,
       name: 'SMUTA Hardware',
       code: '0001',
       pin: '1234',
-      packageId: 'biashara',
+      // packageId: undefined, 
       expiryDate: Date.now() + 5 * 24 * 60 * 60 * 1000, // 5 days (Trial)
       status: 'active',
       staffCount: 1,
       customFeatureCount: 0
-    });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
 
     // 2. Seed Staff (Owner)
     await db.staff.add({

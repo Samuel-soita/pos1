@@ -91,34 +91,36 @@ export function History() {
       )}
 
       {/* Filters Bar */}
-      <div className="card" style={{ display: 'flex', flexWrap: 'wrap', gap: '20px', alignItems: 'flex-end' }}>
-        <div style={{ position: 'relative', flex: 1, minWidth: '250px' }}>
-          <label style={{ display: 'block', marginBottom: '8px', fontWeight: 700 }}>Search Receipts</label>
-          <div style={{ position: 'relative' }}>
-            <Search style={{ position: 'absolute', left: '12px', top: '12px', color: 'var(--text-muted)' }} size={20} />
-            <input 
-              type="text" 
-              placeholder="REC-..." 
-              style={{ paddingLeft: '44px' }}
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
+      <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+        <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+          <div style={{ position: 'relative', flex: 1, minWidth: '200px' }}>
+            <label style={{ marginBottom: '8px', fontWeight: 700, fontSize: '0.875rem' }}>Search Receipts</label>
+            <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+              <Search style={{ position: 'absolute', left: '12px', color: 'var(--text-muted)' }} size={18} />
+              <input 
+                type="text" 
+                placeholder="REC-..." 
+                style={{ paddingLeft: '40px', minHeight: '44px', fontSize: '1rem' }}
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+            </div>
           </div>
-        </div>
 
-        <div style={{ minWidth: '200px' }}>
-          <label style={{ display: 'block', marginBottom: '8px', fontWeight: 700 }}>Filter by Date</label>
-          <div style={{ position: 'relative' }}>
-            <input 
-              type="date" 
-              value={dateFilter} 
-              onChange={(e) => {
-                setDateFilter(e.target.value);
-                setPeriodFilter('Date');
-              }}
-              style={{ width: '100%', paddingLeft: '44px' }}
-            />
-            <Calendar style={{ position: 'absolute', left: '12px', top: '12px', color: 'var(--text-muted)' }} size={20} />
+          <div style={{ flex: 1, minWidth: '200px' }}>
+            <label style={{ marginBottom: '8px', fontWeight: 700, fontSize: '0.875rem' }}>Filter by Date</label>
+            <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+              <input 
+                type="date" 
+                value={dateFilter} 
+                onChange={(e) => {
+                  setDateFilter(e.target.value);
+                  setPeriodFilter('Date');
+                }}
+                style={{ width: '100%', paddingLeft: '40px', minHeight: '44px', fontSize: '1rem' }}
+              />
+              <Calendar style={{ position: 'absolute', left: '12px', color: 'var(--text-muted)' }} size={18} />
+            </div>
           </div>
         </div>
 
@@ -126,14 +128,14 @@ export function History() {
           <button 
             onClick={() => setPeriodFilter('Today')}
             className={periodFilter === 'Today' ? 'btn-primary' : 'btn-secondary'}
-            style={{ padding: '8px 20px' }}
+            style={{ flex: 1, padding: '8px', minHeight: '44px', fontSize: '0.9rem' }}
           >
             Today
           </button>
           <button 
             onClick={() => setPeriodFilter('All')}
             className={periodFilter === 'All' ? 'btn-primary' : 'btn-secondary'}
-            style={{ padding: '8px 20px' }}
+            style={{ flex: 1, padding: '8px', minHeight: '44px', fontSize: '0.9rem' }}
           >
             Show All
           </button>
@@ -141,8 +143,8 @@ export function History() {
       </div>
 
       {/* Transaction List */}
-      <div className="card" style={{ padding: 0, overflowX: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+      <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+        <table className="responsive-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr style={{ textAlign: 'left', borderBottom: '2px solid var(--border)', background: 'var(--bg-secondary)' }}>
               <th style={{ padding: '16px 24px' }}>Receipt ID</th>
@@ -155,16 +157,16 @@ export function History() {
           <tbody>
             {sales.map(sale => (
               <tr key={sale.id} style={{ borderBottom: '1px solid var(--border)' }}>
-                <td style={{ padding: '16px 24px', fontWeight: 600 }}>{sale.receiptId}</td>
-                <td style={{ padding: '16px 24px' }}>{new Date(sale.timestamp).toLocaleTimeString()}</td>
-                <td style={{ padding: '16px 24px' }}>
+                <td style={{ padding: '16px 24px', fontWeight: 600 }} data-label="Receipt">{sale.receiptId}</td>
+                <td style={{ padding: '16px 24px' }} data-label="Time">{new Date(sale.timestamp).toLocaleTimeString()}</td>
+                <td style={{ padding: '16px 24px' }} data-label="Method">
                   <span style={{ padding: '4px 8px', borderRadius: '6px', background: 'var(--bg-secondary)', fontSize: '0.75rem', fontWeight: 700 }}>
                     {sale.paymentMethod}
                   </span>
                 </td>
-                <td style={{ padding: '16px 24px', fontWeight: 800 }}>KES {sale.total.toLocaleString()}</td>
-                <td style={{ padding: '16px 24px', textAlign: 'right' }}>
-                  <button onClick={() => setSelectedSale(sale)} className="btn-secondary" style={{ padding: '8px 12px', minHeight: 'auto' }}>
+                <td style={{ padding: '16px 24px', fontWeight: 800 }} data-label="Amount">KES {sale.total.toLocaleString()}</td>
+                <td style={{ padding: '16px 24px', textAlign: 'right' }} data-label="Actions">
+                  <button onClick={() => setSelectedSale(sale)} className="btn-secondary" style={{ padding: '8px 12px', minHeight: '40px', width: '100%', justifyContent: 'center' }}>
                     <FileText size={16} /> View Receipt
                   </button>
                 </td>
@@ -173,7 +175,7 @@ export function History() {
             {sales.length === 0 && (
               <tr>
                 <td colSpan={5} style={{ padding: '60px', textAlign: 'center', color: 'var(--text-muted)' }}>
-                  No sales found for this selection.
+                  No sales found.
                 </td>
               </tr>
             )}

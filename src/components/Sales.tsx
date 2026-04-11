@@ -3,17 +3,20 @@ import { useInventory } from '../hooks/useInventory';
 import { useSales } from '../hooks/useSales';
 import { useSubscription } from '../hooks/useSubscription';
 import { useAuth } from '../hooks/useAuth';
-import { Search, ShoppingCart, Trash2, Plus, Minus, CheckCircle, X, Banknote, Smartphone } from 'lucide-react';
+import { Search, ShoppingCart, Trash2, Plus, Minus, CheckCircle, X, Banknote, Smartphone, History as HistoryIcon, ArrowLeft } from 'lucide-react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, type Product, type Sale } from '../db/db';
 import { usePrinter } from '../hooks/usePrinter';
 import { BarcodeScanner } from './BarcodeScanner';
+import { History } from './History';
 
 export function Sales() {
   const { products } = useInventory();
   const { cart, addToCart, removeFromCart, updateCartQuantity, completeSale, cartTotal } = useSales();
   const { status } = useSubscription();
   const { business, businessId } = useAuth();
+  
+  const [view, setView] = useState<'pos' | 'history'>('pos');
   
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('All');
@@ -78,32 +81,72 @@ export function Sales() {
     }
   };
 
+  if (view === 'history') {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+        <button 
+          onClick={() => setView('pos')} 
+          className="btn-secondary" 
+          style={{ width: 'fit-content', padding: '8px 16px', minHeight: 'auto', gap: '8px' }}
+        >
+          <ArrowLeft size={18} /> Back to Register
+        </button>
+        <History />
+      </div>
+    );
+  }
+
   return (
-    <div className="pos-grid">
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
+      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button 
+            className="btn-primary" 
+            style={{ padding: '8px 16px', minHeight: '40px', fontSize: '0.9rem' }}
+          >
+            New Sale
+          </button>
+          <button 
+            onClick={() => setView('history')}
+            className="btn-secondary" 
+            style={{ padding: '8px 16px', minHeight: '40px', fontSize: '0.9rem', gap: '8px' }}
+          >
+            <HistoryIcon size={18} /> Daily History
+          </button>
+        </div>
+      </header>
+
+      <div className="pos-grid">
       {/* Product Catalog */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
         
         {/* Category Pills */}
-        <div style={{ display: 'flex', gap: '12px', overflowX: 'auto', paddingBottom: '8px' }}>
+        <div className="no-scrollbar" style={{ display: 'flex', gap: '8px', overflowX: 'auto', paddingBottom: '4px' }}>
           {categories.map(cat => (
             <button 
               key={cat} 
               onClick={() => setSelectedCategory(cat)}
               className={selectedCategory === cat ? 'btn-primary' : 'btn-secondary'}
-              style={{ whiteSpace: 'nowrap', padding: '8px 16px', borderRadius: '20px' }}
+              style={{ 
+                whiteSpace: 'nowrap', 
+                padding: '6px 14px', 
+                borderRadius: '16px', 
+                fontSize: '0.85rem',
+                minHeight: '36px' 
+              }}
             >
               {cat}
             </button>
           ))}
         </div>
 
-        <div style={{ display: 'flex', gap: '12px' }}>
+        <div style={{ display: 'flex', gap: '8px' }}>
           <div style={{ position: 'relative', flex: 1 }}>
-            <Search style={{ position: 'absolute', left: '12px', top: '12px', color: 'var(--text-muted)' }} size={20} />
+            <Search style={{ position: 'absolute', left: '12px', top: '12px', color: 'var(--text-muted)' }} size={18} />
             <input 
               type="text" 
               placeholder="Search products..." 
-              style={{ paddingLeft: '44px' }}
+              style={{ paddingLeft: '40px', minHeight: '44px', fontSize: '1rem' }}
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
@@ -111,18 +154,33 @@ export function Sales() {
           <button 
             className="btn-primary" 
             onClick={() => setShowScanner(true)}
-            style={{ width: 'auto', padding: '0 20px', background: 'var(--primary)' }}
+            style={{ width: 'auto', padding: '0 16px', height: '44px' }}
           >
-            <Smartphone size={20} /> Scan
+            <Smartphone size={18} /> <span className="desktop-only">Scan</span>
           </button>
         </div>
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '16px', overflowY: 'auto', paddingBottom: '24px' }}>
+        <div style={{ 
+          display: 'grid', 
+          gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 150px), 1fr))', 
+          gap: '12px', 
+          overflowY: 'auto', 
+          paddingBottom: '24px' 
+        }}>
           {filteredProducts.map(product => (
-            <div key={product.id} className="product-card" onClick={() => product.quantity > 0 && addToCart(product)} style={{ cursor: product.quantity > 0 ? 'pointer' : 'not-allowed', opacity: product.quantity > 0 ? 1 : 0.6 }}>
-              <div style={{ fontSize: '1.25rem', fontWeight: 700, marginBottom: '4px' }}>{product.name}</div>
-              <div style={{ color: 'var(--primary)', fontWeight: 800, fontSize: '1.125rem' }}>KES {product.price.toLocaleString()}</div>
-              <div className={`stock-badge ${product.quantity <= product.lowStockThreshold ? 'stock-low' : 'stock-ok'}`} style={{ marginTop: '8px' }}>
+            <div 
+              key={product.id} 
+              className="product-card" 
+              onClick={() => product.quantity > 0 && addToCart(product)} 
+              style={{ 
+                cursor: product.quantity > 0 ? 'pointer' : 'not-allowed', 
+                opacity: product.quantity > 0 ? 1 : 0.6,
+                padding: '12px'
+              }}
+            >
+              <div style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '2px' }}>{product.name}</div>
+              <div style={{ color: 'var(--primary)', fontWeight: 800, fontSize: '1rem' }}>KES {product.price.toLocaleString()}</div>
+              <div className={`stock-badge ${product.quantity <= product.lowStockThreshold ? 'stock-low' : 'stock-ok'}`} style={{ marginTop: '6px', fontSize: '0.65rem' }}>
                 Stock: {product.quantity}
               </div>
             </div>
@@ -131,33 +189,33 @@ export function Sales() {
       </div>
 
       {/* Cart Panel */}
-      <div className="card" style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-        <h2 style={{ marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <ShoppingCart size={24} />
-          Current Cart
+      <div className="card" style={{ display: 'flex', flexDirection: 'column', height: '100%', marginBottom: '20px' }} id="cart-panel">
+        <h2 style={{ marginBottom: '16px', fontSize: '1.25rem', display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <ShoppingCart size={20} />
+          Cart ({cart.length})
         </h2>
 
-        <div style={{ flex: 1, overflowY: 'auto', marginBottom: '24px' }}>
+        <div style={{ flex: 1, overflowY: 'auto', marginBottom: '16px', minHeight: cart.length > 0 ? '200px' : 'auto' }}>
           {cart.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)' }}>
-              Cart is empty. Select products or scan a barcode to begin.
+            <div style={{ textAlign: 'center', padding: '32px', color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+              Cart is empty. Select products.
             </div>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               {cart.map(item => (
-                <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px', background: '#f8fafc', borderRadius: '12px' }}>
+                <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px', background: '#f8fafc', borderRadius: '10px' }}>
                   <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 600 }}>{item.name}</div>
-                    <div style={{ fontSize: '0.875rem', color: 'var(--text-muted)' }}>KES {(item.price).toLocaleString()}</div>
+                    <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>{item.name}</div>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>KES {(item.price).toLocaleString()}</div>
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', border: '1px solid var(--border)', borderRadius: '8px', overflow: 'hidden' }}>
-                      <button onClick={(e) => { e.stopPropagation(); updateCartQuantity(item.id, item.quantity - 1); }} style={{ padding: '4px 8px', borderRadius: 0, background: 'transparent' }}><Minus size={14} /></button>
-                      <span style={{ padding: '0 8px', fontWeight: 600 }}>{item.quantity}</span>
-                      <button onClick={(e) => { e.stopPropagation(); updateCartQuantity(item.id, item.quantity + 1); }} style={{ padding: '4px 8px', borderRadius: 0, background: 'transparent' }}><Plus size={14} /></button>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', border: '1px solid var(--border)', borderRadius: '6px', overflow: 'hidden', background: 'white' }}>
+                      <button onClick={(e) => { e.stopPropagation(); updateCartQuantity(item.id, item.quantity - 1); }} style={{ padding: '2px 6px', borderRadius: 0, background: 'transparent', minHeight: '32px' }}><Minus size={12} /></button>
+                      <span style={{ padding: '0 6px', fontWeight: 600, fontSize: '0.85rem' }}>{item.quantity}</span>
+                      <button onClick={(e) => { e.stopPropagation(); updateCartQuantity(item.id, item.quantity + 1); }} style={{ padding: '2px 6px', borderRadius: 0, background: 'transparent', minHeight: '32px' }}><Plus size={12} /></button>
                     </div>
-                    <button onClick={(e) => { e.stopPropagation(); removeFromCart(item.id); }} style={{ color: 'var(--danger)', padding: '8px', background: 'transparent' }}>
-                      <Trash2 size={18} />
+                    <button onClick={(e) => { e.stopPropagation(); removeFromCart(item.id); }} style={{ color: 'var(--danger)', padding: '6px', background: 'transparent', minHeight: '32px' }}>
+                      <Trash2 size={16} />
                     </button>
                   </div>
                 </div>
@@ -166,29 +224,63 @@ export function Sales() {
           )}
         </div>
 
-        <div style={{ borderTop: '2px dashed var(--border)', paddingTop: '24px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '1.25rem', fontWeight: 800, marginBottom: '24px' }}>
-            <span>Total Amount</span>
+        <div style={{ borderTop: '1px dashed var(--border)', paddingTop: '16px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '1.1rem', fontWeight: 800, marginBottom: '16px' }}>
+            <span>Total</span>
             <span>KES {cartTotal.toLocaleString()}</span>
           </div>
           
           {showSuccess && (
-            <div style={{ background: '#dcfce7', color: '#166534', padding: '12px', borderRadius: '12px', textAlign: 'center', marginBottom: '16px', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
-              <CheckCircle size={20} />
-              Sale Completed Successfully!
+            <div style={{ background: '#dcfce7', color: '#166534', padding: '10px', borderRadius: '10px', textAlign: 'center', marginBottom: '12px', fontSize: '0.85rem', fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}>
+              <CheckCircle size={16} />
+              Sale Completed!
             </div>
           )}
 
           <button 
             className="btn-primary" 
-            style={{ width: '100%', height: '60px', fontSize: '1.25rem' }}
+            style={{ width: '100%', height: '52px', fontSize: '1.1rem' }}
             disabled={cart.length === 0 || status === 'locked'}
             onClick={() => setShowCheckoutModal(true)}
           >
             Complete Checkout
           </button>
         </div>
+        </div>
       </div>
+
+      {/* Floating Checkout Button for Mobile */}
+      {cart.length > 0 && !showCheckoutModal && (
+        <div className="mobile-only" style={{ 
+          position: 'fixed', 
+          bottom: '80px', 
+          left: '16px', 
+          right: '16px', 
+          zIndex: 100,
+          animation: 'slideUp 0.3s ease-out'
+        }}>
+          <button 
+            className="btn-primary" 
+            onClick={() => {
+              const el = document.getElementById('cart-panel');
+              if (el) el.scrollIntoView({ behavior: 'smooth' });
+              setTimeout(() => setShowCheckoutModal(true), 400);
+            }}
+            style={{ 
+              width: '100%', 
+              boxShadow: '0 10px 15px -3px rgba(0,0,0,0.2)',
+              justifyContent: 'space-between',
+              padding: '0 24px'
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <ShoppingCart size={20} />
+              <span>{cart.length} items</span>
+            </div>
+            <span>KES {cartTotal.toLocaleString()}</span>
+          </button>
+        </div>
+      )}
 
       {/* Checkout Payment Modal */}
       {showCheckoutModal && (
@@ -215,7 +307,7 @@ export function Sales() {
               )}
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '1.5rem', fontWeight: 800 }}>
                 <span>Total</span>
-                <span>${cartTotal.toFixed(2)}</span>
+                <span>KES {cartTotal.toLocaleString()}</span>
               </div>
             </div>
 
@@ -244,13 +336,14 @@ export function Sales() {
                    <p style={{ fontSize: '0.875rem', color: '#166534', marginBottom: '20px' }}>Name: SAMUEL SOITA</p>
                    
                    <div className="input-group" style={{ marginBottom: 0 }}>
-                     <label style={{ color: '#166534' }}>M-Pesa Transaction Code (Optional)</label>
+                     <label style={{ color: '#166534', fontWeight: 700 }}>M-Pesa Transaction Code</label>
                      <input 
+                       required
                        type="text" 
                        placeholder="e.g. QRC7W8X9Y" 
                        value={mpesaCode}
                        onChange={e => setMpesaCode(e.target.value.toUpperCase())}
-                       style={{ borderColor: '#86efac' }}
+                       style={{ borderColor: '#86efac', fontWeight: 800, letterSpacing: '1px' }}
                      />
                    </div>
                 </div>
@@ -258,10 +351,19 @@ export function Sales() {
 
               <button 
                 className="btn-primary" 
-                style={{ width: '100%', height: '64px', fontSize: '1.25rem', marginTop: '12px', background: paymentMethod === 'M-Pesa' ? 'var(--success)' : 'var(--primary)' }}
+                style={{ 
+                  width: '100%', 
+                  height: '64px', 
+                  fontSize: '1.25rem', 
+                  marginTop: '12px', 
+                  background: paymentMethod === 'M-Pesa' ? 'var(--success)' : 'var(--primary)',
+                  opacity: (paymentMethod === 'M-Pesa' && !mpesaCode.trim()) ? 0.6 : 1,
+                  cursor: (paymentMethod === 'M-Pesa' && !mpesaCode.trim()) ? 'not-allowed' : 'pointer'
+                }}
+                disabled={(paymentMethod === 'M-Pesa' && !mpesaCode.trim())}
                 onClick={() => executePayment(paymentMethod)}
               >
-                Confirm {cartTotal.toFixed(2)} Paid
+                Confirm KES {cartTotal.toFixed(2)} Paid
               </button>
             </div>
           </div>

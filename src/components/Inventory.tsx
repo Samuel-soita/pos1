@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useInventory } from '../hooks/useInventory';
 import { useSubscription } from '../hooks/useSubscription';
 import { type Product } from '../db/db';
-import { Plus, Edit2, Trash2, PackagePlus, Search, X, AlertTriangle } from 'lucide-react';
+import { Plus, Edit2, Trash2, PackagePlus, Search, X } from 'lucide-react';
 
 export function Inventory() {
   const { products, addProduct, updateProduct, deleteProduct, restockProduct } = useInventory();
@@ -85,8 +85,8 @@ export function Inventory() {
       </div>
 
       {/* Product List */}
-      <div className="card" style={{ padding: 0, overflowX: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+      <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+        <table className="responsive-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr style={{ textAlign: 'left', borderBottom: '2px solid var(--border)', background: '#f8fafc' }}>
               <th style={{ padding: '16px' }}>Product Name</th>
@@ -101,44 +101,28 @@ export function Inventory() {
           <tbody>
             {filteredProducts.map(product => (
               <tr key={product.id} style={{ borderBottom: '1px solid var(--border)' }}>
-                <td style={{ padding: '16px', fontWeight: 600 }}>{product.name}</td>
-                <td style={{ padding: '16px' }}>{product.category || 'General'}</td>
-                <td style={{ padding: '16px' }}>KES {product.price.toLocaleString()}</td>
-                <td style={{ padding: '16px', color: 'var(--text-muted)' }}>KES {(product.costPrice ?? 0).toLocaleString()}</td>
-                <td style={{ padding: '16px' }}>
+                <td style={{ padding: '16px', fontWeight: 600 }} data-label="Name">{product.name}</td>
+                <td style={{ padding: '16px' }} data-label="Category">{product.category || 'General'}</td>
+                <td style={{ padding: '16px' }} data-label="Price">KES {product.price.toLocaleString()}</td>
+                <td style={{ padding: '16px', color: 'var(--text-muted)' }} data-label="Cost">KES {(product.costPrice ?? 0).toLocaleString()}</td>
+                <td style={{ padding: '16px' }} data-label="Stock">
                   <span className={`stock-badge ${product.quantity <= product.lowStockThreshold ? 'stock-low' : 'stock-ok'}`}>
                     {product.quantity} units
                   </span>
                 </td>
-                <td style={{ padding: '16px', color: 'var(--text-muted)' }}>{product.lowStockThreshold}</td>
-                <td style={{ padding: '16px' }}>
-                  {(!product.costPrice || product.costPrice === 0) && (
-                    <span style={{ 
-                      background: '#fff7ed', 
-                      color: '#9a3412', 
-                      padding: '4px 8px', 
-                      borderRadius: '8px', 
-                      fontSize: '0.75rem', 
-                      fontWeight: 700,
-                      border: '1px solid #ffedd5',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '4px'
-                    }}>
-                      <AlertTriangle size={12} /> No Cost Set
-                    </span>
-                  )}
-                </td>
-                <td style={{ padding: '16px', textAlign: 'right', display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-                  <button onClick={() => restockProduct(product.id!, 10)} className="btn-secondary" style={{ padding: '8px' }} title="Quick Add 10" disabled={status === 'locked'}>
-                    <PackagePlus size={18} />
-                  </button>
-                  <button onClick={() => startEdit(product)} className="btn-secondary" style={{ padding: '8px' }} disabled={status === 'locked'}>
-                    <Edit2 size={18} />
-                  </button>
-                  <button onClick={() => deleteProduct(product.id!)} className="btn-secondary" style={{ padding: '8px', color: 'var(--danger)' }} disabled={status === 'locked'}>
-                    <Trash2 size={18} />
-                  </button>
+                <td style={{ padding: '16px', color: 'var(--text-muted)' }} data-label="Threshold">{product.lowStockThreshold}</td>
+                <td style={{ padding: '16px', textAlign: 'right', display: 'flex', gap: '8px', justifyContent: 'flex-end' }} data-label="Actions">
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button onClick={() => restockProduct(product.id!, 10)} className="btn-secondary" style={{ padding: '8px', minHeight: '40px' }} title="Quick Add 10" disabled={status === 'locked'}>
+                      <PackagePlus size={18} />
+                    </button>
+                    <button onClick={() => startEdit(product)} className="btn-secondary" style={{ padding: '8px', minHeight: '40px' }} disabled={status === 'locked'}>
+                      <Edit2 size={18} />
+                    </button>
+                    <button onClick={() => deleteProduct(product.id!)} className="btn-secondary" style={{ padding: '8px', minHeight: '40px', color: 'var(--danger)' }} disabled={status === 'locked'}>
+                      <Trash2 size={18} />
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}

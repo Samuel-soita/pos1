@@ -1,15 +1,21 @@
 import { useState, useEffect } from 'react';
 import { db } from '../db/db';
-import { Store, Calculator, ShieldCheck, Lock, Printer, Download } from 'lucide-react';
+import { Store, Calculator, ShieldCheck, Lock, Printer, Download, Sparkles, CreditCard } from 'lucide-react';
 import { usePrinter } from '../hooks/usePrinter';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useSync } from '../hooks/useSync';
+import { useAuth } from '../hooks/useAuth';
+import { useSubscription } from '../hooks/useSubscription';
+import { PackageSelection } from './PackageSelection';
 
 export function Settings() {
   const [businessName, setBusinessName] = useState('');
   // useSync initializes background updates
   useSync();
   const { connect, isConnected, deviceName, isSupported } = usePrinter();
+  const { userType, business } = useAuth();
+  const { packages, status, daysLeft } = useSubscription();
+  const [showPlanSelector, setShowPlanSelector] = useState(false);
 
   // Live Settings
   const taxRateSetting = useLiveQuery(() => db.settings.get('tax_rate'));
@@ -84,10 +90,77 @@ export function Settings() {
         <p style={{ color: 'var(--text-muted)' }}>Manage your business information, taxes, and security.</p>
       </header>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 400px), 1fr))', gap: '32px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 320px), 1fr))', gap: '24px' }}>
         
+        {/* Subscription & Billing - OWNER ONLY */}
+        {userType === 'owner' && (
+          <div className="card" style={{ border: '2px solid var(--primary)', background: 'linear-gradient(135deg, #ffffff 0%, #f8fafc 100%)', padding: 'min(20px, 4vw)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
+              <div>
+                <h2 style={{ fontSize: '1.25rem', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '4px' }}>
+                  <CreditCard size={20} color="var(--primary)" />
+                  Subscription & Billing
+                </h2>
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Manage your plan and business billing.</p>
+              </div>
+              <div style={{ background: status === 'active' ? 'rgba(34, 197, 94, 0.1)' : 'rgba(239, 68, 68, 0.1)', color: status === 'active' ? '#166534' : '#991b1b', padding: '6px 12px', borderRadius: '10px', fontWeight: 800, fontSize: '0.8rem' }}>
+                {status.toUpperCase()} {daysLeft > 0 && `(${daysLeft}d left)`}
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '20px' }}>
+              <div style={{ 
+                background: 'white', 
+                padding: '24px 20px', 
+                borderRadius: '20px', 
+                border: '1px solid var(--border)',
+                textAlign: 'center',
+                width: '100%',
+                maxWidth: '200px',
+                aspectRatio: '1 / 1',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'center',
+                gap: '12px',
+                boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)'
+              }}>
+                <div>
+                  <p style={{ fontSize: '0.65rem', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '8px' }}>Active Plan</p>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', color: 'var(--primary)' }}>
+                    <Sparkles size={18} strokeWidth={3} />
+                    <span style={{ fontSize: '1.25rem', fontWeight: 900 }}>
+                      {business?.packageId ? packages[business.packageId as keyof typeof packages]?.name : 'None'}
+                    </span>
+                  </div>
+                </div>
+                
+                <div style={{ borderTop: '1px solid var(--border)', paddingTop: '12px' }}>
+                  <p style={{ fontSize: '0.65rem', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>Monthly Cost</p>
+                  <span style={{ fontSize: '1.1rem', fontWeight: 900 }}>
+                    KES {business?.packageId ? (packages[business.packageId as keyof typeof packages]?.price || 0).toLocaleString() : '0'}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {showPlanSelector ? (
+              <div className="fade-in" style={{ background: 'white', padding: 'min(16px, 4vw)', borderRadius: '16px', border: '1px solid var(--border)', marginTop: '16px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
+                  <h3 style={{ fontWeight: 800, fontSize: '1rem' }}>Available Packages</h3>
+                  <button className="btn-secondary" style={{ padding: '4px 12px', height: '32px', fontSize: '0.85rem' }} onClick={() => setShowPlanSelector(false)}>Cancel</button>
+                </div>
+                <PackageSelection isEmbedded onComplete={() => setShowPlanSelector(false)} />
+              </div>
+            ) : (
+              <button className="btn-primary" onClick={() => setShowPlanSelector(true)} style={{ width: 'auto', padding: '8px 20px', height: '44px', fontSize: '0.95rem' }}>
+                Change Plan
+              </button>
+            )}
+          </div>
+        )}
+
         {/* Business Profile */}
-        <div className="card">
+        <div className="card" style={{ padding: 'min(24px, 5vw)' }}>
           <h2 style={{ fontSize: '1.5rem', fontWeight: 700, marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}>
             <Store size={24} color="var(--primary)" />
             Business Profile
@@ -105,7 +178,7 @@ export function Settings() {
         </div>
 
         {/* Sales & Tax Settings */}
-        <div className="card">
+        <div className="card" style={{ padding: 'min(24px, 5vw)' }}>
           <h2 style={{ fontSize: '1.5rem', fontWeight: 700, marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}>
             <Calculator size={24} color="var(--primary)" />
             Sales & Tax
@@ -125,33 +198,32 @@ export function Settings() {
         </div>
 
         {/* Access Control & Security */}
-        <div className="card" style={{ gridColumn: '1 / -1' }}>
+        <div className="card" style={{ padding: 'min(24px, 5vw)' }}>
            <h2 style={{ fontSize: '1.5rem', fontWeight: 700, marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}>
             <ShieldCheck size={24} color="var(--primary)" />
             Staff Security Mode
           </h2>
           <p style={{ marginBottom: '20px', color: 'var(--text-muted)' }}>
             Are you handing this tablet to an employee? Enable Staff Mode to restrict access to Inventory and Reports.
-            Cashiers will only be able to process Sales and view past Receipts.
           </p>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(200px, 1fr) minmax(200px, 1fr)', gap: '20px', marginBottom: '24px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 250px), 1fr))', gap: '16px', marginBottom: '24px' }}>
             <div 
-              style={{ border: `2px solid ${securityMode === 'owner' ? 'var(--primary)' : 'var(--border)'}`, padding: '16px', borderRadius: '12px', cursor: 'pointer', background: securityMode === 'owner' ? '#eff6ff' : 'white' }}
+              style={{ border: `2px solid ${securityMode === 'owner' ? 'var(--primary)' : 'var(--border)'}`, padding: '20px', borderRadius: '12px', cursor: 'pointer', background: securityMode === 'owner' ? '#eff6ff' : 'white' }}
               onClick={() => setSecurityMode('owner')}
             >
               <h3 style={{ fontWeight: 800, marginBottom: '8px' }}>Owner Mode</h3>
-              <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>App is completely open. No locks or PINs required to browse tabs.</p>
+              <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>App is completely open. No locks or PINs required to browse tabs.</p>
             </div>
             
             <div 
-              style={{ border: `2px solid ${securityMode === 'staff' ? 'var(--danger)' : 'var(--border)'}`, padding: '16px', borderRadius: '12px', cursor: 'pointer', background: securityMode === 'staff' ? '#fef2f2' : 'white' }}
+              style={{ border: `2px solid ${securityMode === 'staff' ? 'var(--danger)' : 'var(--border)'}`, padding: '20px', borderRadius: '12px', cursor: 'pointer', background: securityMode === 'staff' ? '#fef2f2' : 'white' }}
               onClick={() => setSecurityMode('staff')}
             >
               <h3 style={{ fontWeight: 800, marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <Lock size={16} /> Staff Restricted
               </h3>
-              <p style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>App locks everything except Sales. Requires Owner PIN to bypass.</p>
+              <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>App locks everything except Sales. Requires Owner PIN to bypass.</p>
             </div>
           </div>
 
@@ -164,18 +236,18 @@ export function Settings() {
                 value={ownerPin} 
                 onChange={(e) => setOwnerPin(e.target.value.replace(/[^0-9]/g, ''))} 
                 placeholder="0000"
-                style={{ fontSize: '1.5rem', letterSpacing: '0.5rem', textAlign: 'center' }}
+                style={{ fontSize: '1.25rem', letterSpacing: '0.5rem', textAlign: 'center' }}
               />
             </div>
           )}
 
-          <button className="btn-primary" onClick={handleSaveSecurity} style={{ marginTop: '12px' }}>
+          <button className="btn-primary" onClick={handleSaveSecurity} style={{ marginTop: '12px', width: 'auto' }}>
             Save Security Policy
           </button>
         </div>
 
         {/* App Management & Installation */}
-        <div className="card" style={{ gridColumn: '1 / -1' }}>
+        <div className="card">
           <h2 style={{ fontSize: '1.5rem', fontWeight: 700, marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}>
             <Download size={24} color="var(--primary)" />
             App Management
@@ -205,7 +277,7 @@ export function Settings() {
         </div>
 
         {/* Hardware & Peripherals */}
-        <div className="card" style={{ gridColumn: '1 / -1' }}>
+        <div className="card">
           <h2 style={{ fontSize: '1.5rem', fontWeight: 700, marginBottom: '24px', display: 'flex', alignItems: 'center', gap: '12px' }}>
             <Printer size={24} color="var(--primary)" />
             Hardware & Peripherals

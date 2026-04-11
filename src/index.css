@@ -117,8 +117,51 @@ input:focus {
 @media (max-width: 1024px) {
   .pos-grid {
     display: flex;
-    flex-direction: column-reverse;
+    flex-direction: column;
     height: auto;
+  }
+}
+
+/* Responsive Table utilities */
+@media (max-width: 768px) {
+  .responsive-table tr {
+    display: flex;
+    flex-direction: column;
+    background: white;
+    margin-bottom: 16px;
+    border: 1px solid var(--border) !important;
+    border-radius: 12px;
+    padding: 12px;
+    box-shadow: var(--shadow);
+  }
+
+  .responsive-table th {
+    display: none; /* Hide headers on mobile */
+  }
+
+  .responsive-table td {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 4px !important;
+    border-bottom: 1px solid #f1f5f9;
+  }
+
+  .responsive-table td:last-child {
+    border-bottom: none;
+    margin-top: 8px;
+    justify-content: center;
+    background: #f8fafc;
+    border-radius: 8px;
+  }
+
+  /* Label injection for mobile tables */
+  .responsive-table td::before {
+    content: attr(data-label);
+    font-weight: 700;
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    text-transform: uppercase;
   }
 }
 

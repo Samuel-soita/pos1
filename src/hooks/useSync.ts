@@ -5,6 +5,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 
 export function useSync() {
   const [isSyncing, setIsSyncing] = useState(false);
+  const isSyncingRef = useRef(false);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
 
@@ -290,25 +291,34 @@ export function useSync() {
       }
 
       // Pull staff for this business
-      const { data: staffData, error: staffErr } = await supabase
-        .from('staff')
-        .select('*')
-        .eq('business_id', bizId);
-      
-      if (staffErr) throw staffErr;
-      if (staffData) {
-        const mappedStaff = staffData.map(s => ({
-          id: s.id,
-          businessId: s.business_id,
-          code: s.code,
-          pin: s.pin,
-          firstName: s.first_name,
-          lastName: s.last_name,
-          phoneNumber: s.phone_number,
-          idNumber: s.id_number,
-          status: s.status
-        }));
-        await db.staff.bulkPut(mappedStaff);
+      try {
+        const { data: staffData, error: staffErr } = await supabase
+          .from('staff')
+          .select('*')
+          .eq('business_id', bizId);
+        
+        if (staffErr) {
+          if (staffErr.code === 'PGRST205') {
+            console.warn('Backend Pull Skip: "staff" table not found in Supabase.');
+          } else {
+            throw staffErr;
+          }
+        } else if (staffData && staffData.length > 0) {
+          const mappedStaff = staffData.map(s => ({
+            id: s.id,
+            businessId: s.business_id,
+            code: s.code,
+            pin: s.pin,
+            firstName: s.first_name,
+            lastName: s.last_name,
+            phoneNumber: s.phone_number,
+            idNumber: s.id_number,
+            status: s.status
+          }));
+          await db.staff.bulkPut(mappedStaff);
+        }
+      } catch (err) {
+        console.warn('Silent Pull Error (staff):', err);
       }
 
       // Update sync timestamp using server time (prevents local clock tampering sync issues)
@@ -349,17 +359,19 @@ export function useSync() {
   };
 
   const syncAll = useCallback(async () => {
-    if (!navigator.onLine || isSyncing) return;
+    if (!navigator.onLine || isSyncingRef.current) return;
     
+    isSyncingRef.current = true;
     setIsSyncing(true);
     setSyncError(null);
     try {
       await pushLocalChanges();
       await pullRemoteChanges();
     } finally {
+      isSyncingRef.current = false;
       setIsSyncing(false);
     }
-  }, [isSyncing]);
+  }, []); // Stable identity
 
   // Auto-sync when coming back online
   useEffect(() => {
@@ -371,12 +383,12 @@ export function useSync() {
   // Periodic background sync (every 5 minutes)
   useEffect(() => {
     const interval = setInterval(() => {
-      if (isOnline) {
+      if (navigator.onLine) {
         syncAll();
       }
     }, 5 * 60 * 1000);
     return () => clearInterval(interval);
-  }, [isOnline, syncAll]);
+  }, [syncAll]);
 
   // Immediate push when sync_queue items are added
   const pendingCount = useLiveQuery(() => db.sync_queue.count()) || 0;
@@ -385,28 +397,34 @@ export function useSync() {
   useEffect(() => {
     if (pendingCount > prevPendingCount.current) {
       // Something was added, try to push immediately
-      if (isOnline && !isSyncing) {
+      if (navigator.onLine) {
         syncAll();
       }
     }
     prevPendingCount.current = pendingCount;
-  }, [pendingCount, isOnline, isSyncing, syncAll]);
+  }, [pendingCount, syncAll]);
 
   // Special "Activation" check (High frequency pull when potentially recently paid)
   useEffect(() => {
-    const checkPayment = async () => {
+    let interval: ReturnType<typeof setInterval>;
+    const checkPaymentAndSetup = async () => {
       const isDepositPaid = (await db.settings.get('is_deposit_paid'))?.value === true;
       const expiryDate = (await db.settings.get('expiry_date'))?.value as number;
       const soonToExpire = expiryDate - Date.now() < 24 * 60 * 60 * 1000;
       
-      if ((!isDepositPaid || soonToExpire) && isOnline && !isSyncing) {
+      if ((!isDepositPaid || soonToExpire)) {
         // Pull updates every minute if we are awaiting activation or about to expire
-        const interval = setInterval(() => syncAll(), 60000);
-        return () => clearInterval(interval);
+        interval = setInterval(() => {
+          if (navigator.onLine) syncAll();
+        }, 60000);
       }
     };
-    checkPayment();
-  }, [isOnline, isSyncing, syncAll]);
+    
+    checkPaymentAndSetup();
+    return () => {
+       if (interval) clearInterval(interval);
+    };
+  }, [syncAll]);
 
   return {
     isOnline,

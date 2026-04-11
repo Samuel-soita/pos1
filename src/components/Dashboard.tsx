@@ -1,9 +1,9 @@
 import { useInventory } from '../hooks/useInventory';
-import { TrendingUp, Package, AlertTriangle, CheckCircle2, Wallet } from 'lucide-react';
+import { TrendingUp, Package, AlertTriangle, CheckCircle2, Wallet, BarChart3, Users, Settings, AlertCircle } from 'lucide-react';
 import { db } from '../db/db';
 import { useLiveQuery } from 'dexie-react-hooks';
 
-export function Dashboard() {
+export function Dashboard({ onTabChange }: { onTabChange: (tab: string) => void }) {
   const { products, getLowStockProducts } = useInventory();
   
   const securityModeSetting = useLiveQuery(() => db.settings.get('security_mode'));
@@ -68,6 +68,54 @@ export function Dashboard() {
         ))}
       </div>
 
+      {/* Management Section */}
+      <div>
+        <h3 style={{ marginBottom: '20px', fontWeight: 800, fontSize: '1.25rem' }}>Store Management</h3>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: '20px' }}>
+          <button 
+            onClick={() => onTabChange('reports')}
+            className="card" 
+            style={{ display: 'flex', alignItems: 'center', gap: '16px', width: '100%', cursor: 'pointer', textAlign: 'left', background: 'white' }}
+          >
+            <div style={{ background: '#e0e7ff', padding: '12px', borderRadius: '12px' }}>
+              <BarChart3 size={24} color="#4338ca" />
+            </div>
+            <div>
+              <p style={{ fontWeight: 700 }}>Analytics & Reports</p>
+              <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>View detailed sales trends</p>
+            </div>
+          </button>
+
+          <button 
+            onClick={() => onTabChange('staff')}
+            className="card" 
+            style={{ display: 'flex', alignItems: 'center', gap: '16px', width: '100%', cursor: 'pointer', textAlign: 'left', background: 'white' }}
+          >
+            <div style={{ background: '#fef3c7', padding: '12px', borderRadius: '12px' }}>
+              <Users size={24} color="#b45309" />
+            </div>
+            <div>
+              <p style={{ fontWeight: 700 }}>Staff Management</p>
+              <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Manage roles and PINs</p>
+            </div>
+          </button>
+
+          <button 
+            onClick={() => onTabChange('settings')}
+            className="card" 
+            style={{ display: 'flex', alignItems: 'center', gap: '16px', width: '100%', cursor: 'pointer', textAlign: 'left', background: 'white' }}
+          >
+            <div style={{ background: '#f1f5f9', padding: '12px', borderRadius: '12px' }}>
+              <Settings size={24} color="var(--secondary)" />
+            </div>
+            <div>
+              <p style={{ fontWeight: 700 }}>Settings</p>
+              <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>Configure app & billing</p>
+            </div>
+          </button>
+        </div>
+      </div>
+
       {/* Low Stock Section */}
       <div className="card">
         <h3 style={{ marginBottom: '20px', display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -96,7 +144,3 @@ export function Dashboard() {
     </div>
   );
 }
-
-const AlertCircle = ({ size, color }: { size: number, color: string }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-);

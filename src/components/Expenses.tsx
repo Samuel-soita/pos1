@@ -84,16 +84,14 @@ export function Expenses() {
       </div>
 
       <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-        <div style={{ padding: '24px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <h3 style={{ display: 'flex', alignItems: 'center', gap: '8px' }}><Clock size={20} /> Recent Logs</h3>
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <button className="btn-secondary" style={{ padding: '8px 16px', minHeight: 'auto', fontSize: '0.875rem' }}>
-              <Filter size={16} /> Filter
-            </button>
-          </div>
+        <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <h3 style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '1.1rem' }}><Clock size={18} /> Recent Logs</h3>
+          <button className="btn-secondary" style={{ padding: '6px 12px', minHeight: '36px', fontSize: '0.8rem' }}>
+            <Filter size={14} /> Filter
+          </button>
         </div>
-        <div style={{ overflowX: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <div style={{ width: '100%' }}>
+          <table className="responsive-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr style={{ background: '#f8fafc', borderBottom: '1px solid var(--border)' }}>
                 <th style={{ textAlign: 'left', padding: '16px 24px', fontSize: '0.875rem', color: 'var(--text-muted)' }}>Date</th>
@@ -106,29 +104,29 @@ export function Expenses() {
             <tbody>
               {expenses.length === 0 ? (
                 <tr>
-                  <td colSpan={5} style={{ textAlign: 'center', padding: '48px', color: 'var(--text-muted)' }}>No expenses logged yet.</td>
+                  <td colSpan={5} style={{ textAlign: 'center', padding: '48px', color: 'var(--text-muted)' }}>No expenses logged.</td>
                 </tr>
               ) : (
                 expenses.map(exp => (
                   <tr key={exp.id} style={{ borderBottom: '1px solid var(--border)' }}>
-                    <td style={{ padding: '16px 24px', fontSize: '0.875rem' }}>
+                    <td style={{ padding: '16px 24px', fontSize: '0.875rem' }} data-label="Date">
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <Calendar size={14} color="var(--text-muted)" />
                         {new Date(exp.timestamp).toLocaleDateString()}
                       </div>
                     </td>
-                    <td style={{ padding: '16px 24px', fontWeight: 600 }}>{exp.title}</td>
-                    <td style={{ padding: '16px 24px' }}>
+                    <td style={{ padding: '16px 24px', fontWeight: 600 }} data-label="Title">{exp.title}</td>
+                    <td style={{ padding: '16px 24px' }} data-label="Category">
                       <span style={{ background: '#f1f5f9', padding: '4px 12px', borderRadius: 'full', fontSize: '0.75rem', fontWeight: 600 }}>
                         {exp.category}
                       </span>
                     </td>
-                    <td style={{ padding: '16px 24px', textAlign: 'right', fontWeight: 700, color: 'var(--danger)' }}>
+                    <td style={{ padding: '16px 24px', textAlign: 'right', fontWeight: 700, color: 'var(--danger)' }} data-label="Amount">
                       KES {exp.amount.toLocaleString()}
                     </td>
-                    <td style={{ padding: '16px 24px', textAlign: 'right' }}>
-                      <button onClick={() => handleDelete(exp.id)} style={{ padding: '8px', minHeight: 'auto', background: 'transparent', color: 'var(--danger)' }}>
-                        <Trash2 size={18} />
+                    <td style={{ padding: '16px 24px', textAlign: 'right' }} data-label="Actions">
+                      <button onClick={() => handleDelete(exp.id)} style={{ padding: '8px', minHeight: '40px', background: 'transparent', color: 'var(--danger)', width: '100%', display: 'flex', justifyContent: 'center' }}>
+                        <Trash2 size={18} /> <span className="mobile-only" style={{ marginLeft: '8px' }}>Delete</span>
                       </button>
                     </td>
                   </tr>

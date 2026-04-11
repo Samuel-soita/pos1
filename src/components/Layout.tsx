@@ -1,12 +1,11 @@
 import { useState, useEffect, type ReactNode } from 'react';
-import { ShoppingCart, Package, BarChart3, History, Settings, Lock, X, Cloud, CloudOff, RefreshCw, Sparkles, Receipt } from 'lucide-react';
+import { ShoppingCart, Package, BarChart3, Lock, X, Cloud, CloudOff, RefreshCw, Sparkles, Receipt } from 'lucide-react';
 import { usePWAUpdate } from '../hooks/usePWAUpdate';
 import { useSync, useSyncStatus } from '../hooks/useSync';
 import { useSubscription } from '../hooks/useSubscription';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/db';
 import { useAuth } from '../hooks/useAuth';
-import { Users } from 'lucide-react';
 
 interface LayoutProps {
   children: ReactNode;
@@ -44,10 +43,6 @@ export function Layout({ children, activeTab, setActiveTab }: LayoutProps) {
     { id: 'sales', label: 'Sales', icon: <ShoppingCart size={20} /> },
     { id: 'inventory', label: 'My Store', icon: <Package size={20} /> },
     { id: 'expenses', label: 'Expenses', icon: <Receipt size={20} /> },
-    { id: 'staff', label: 'Staff', icon: <Users size={20} /> },
-    { id: 'history', label: 'History', icon: <History size={20} /> },
-    { id: 'reports', label: 'Analytics', icon: <BarChart3 size={20} /> },
-    { id: 'settings', label: 'Settings', icon: <Settings size={20} /> },
   ];
 
   const handleTabClick = (tabId: string) => {
