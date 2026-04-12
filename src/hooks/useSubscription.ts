@@ -28,7 +28,7 @@ export function useSubscription() {
             authoritativeNow = Math.max(Date.now(), payload.server_now);
           }
         }
-      } catch(e) {
+      } catch {
         // ignore
       }
       setNow(authoritativeNow);

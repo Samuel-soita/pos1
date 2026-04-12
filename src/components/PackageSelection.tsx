@@ -4,6 +4,12 @@ import { useSubscription } from '../hooks/useSubscription';
 import { useAuth } from '../hooks/useAuth';
 import { Check, Sparkles, Zap, Shield, Store, LayoutGrid, Users } from 'lucide-react';
 
+interface Package {
+  name: string;
+  price: number;
+  features: string[];
+}
+
 export function PackageSelection({ isEmbedded = false, onComplete }: { isEmbedded?: boolean, onComplete?: () => void }) {
   const { packages, status: subStatus, trialUsed } = useSubscription();
   const { business } = useAuth();
@@ -20,7 +26,8 @@ export function PackageSelection({ isEmbedded = false, onComplete }: { isEmbedde
         status: 'trial',
         trialUsed: true
       });
-      alert(`${(packages as Record<string, any>)[packageId]?.name} activated for your one-time 5-day trial!`);
+      const pkg = (packages as Record<string, Package>)[packageId];
+      alert(`${pkg?.name} activated for your one-time 5-day trial!`);
       if (onComplete) {
         onComplete();
       } else {
@@ -30,7 +37,7 @@ export function PackageSelection({ isEmbedded = false, onComplete }: { isEmbedde
       console.error(err);
       alert('Failed to update plan');
     }
-  }, [business, packages, onComplete]);
+  }, [business, packages, onComplete, trialUsed]);
 
   const icons = useMemo(() => ({
     hustler: <Store size={40} />,
@@ -118,7 +125,7 @@ export function PackageSelection({ isEmbedded = false, onComplete }: { isEmbedde
 
             <div style={{ color: 'var(--primary)', marginBottom: '16px' }}>
               {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-              {icons[id as keyof typeof icons] && React.cloneElement(icons[id as keyof typeof icons] as any, { size: 32 })}
+              {icons[id as keyof typeof icons] && React.cloneElement(icons[id as keyof typeof icons] as React.ReactElement<any>, { size: 32 })}
             </div>
 
             <div style={{ marginBottom: '20px' }}>

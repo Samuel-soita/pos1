@@ -11,7 +11,7 @@ export class POSReducer {
 
     switch (event.event_type) {
       case 'stock_reserved':
-      case 'stock_committed':
+      case 'stock_committed': {
         // Payload: { productId, delta }
         const { productId, delta } = event.payload;
         if (!newState[productId]) {
@@ -19,6 +19,7 @@ export class POSReducer {
         }
         newState[productId] += delta;
         break;
+      }
       
       case 'sale_created':
         // Payload: { id, total, items... }
@@ -26,7 +27,7 @@ export class POSReducer {
         newState.sale_count = (newState.sale_count || 0) + 1;
         break;
       
-      case 'stock_rejected':
+      case 'stock_rejected': {
         // Reversal of an optimistic projection
         const { productId: rejId, delta: rejDelta } = event.payload;
         if (newState[rejId] !== undefined) {
@@ -34,6 +35,7 @@ export class POSReducer {
           newState[rejId] -= rejDelta;
         }
         break;
+      }
     }
 
     return {

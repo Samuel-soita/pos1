@@ -7,18 +7,20 @@ export type TimeWindow = 'day' | 'week' | 'month' | 'quarter' | '6months' | 'yea
 
 export function useReports(timeWindow: TimeWindow, branchFilter?: string) {
   const { businessId, branchId: userBranchId, userType } = useAuth();
+  
   const queryResult = useLiveQuery(() => {
     if (!businessId) return [];
     return db.sales.where('businessId').equals(businessId).toArray();
   }, [businessId]);
 
-  const staffList = useLiveQuery(() => {
+  const rawStaffList = useLiveQuery(() => {
     if (!businessId) return [];
     return db.staff.where('businessId').equals(businessId).toArray();
-  }, [businessId]) || [];
+  }, [businessId]);
 
   const { sales, totalSales, totalProfit, topProducts, trends, staffPerformance } = useMemo(() => {
     const allSales = queryResult || [];
+    const staff = rawStaffList || [];
     const now = new Date();
     // Default to start of today for 'day'
     const startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -75,7 +77,7 @@ export function useReports(timeWindow: TimeWindow, branchFilter?: string) {
       // Staff aggregation
       const sId = sale.staffId || 'Owner';
       if (!staffPerformanceMap[sId]) {
-        const staffObj = staffList.find(s => s.id === sId);
+        const staffObj = staff.find(s => s.id === sId);
         staffPerformanceMap[sId] = { 
           name: staffObj ? `${staffObj.firstName} ${staffObj.lastName}` : 'Direct/Owner',
           firstName: staffObj?.firstName || 'Owner',
@@ -127,7 +129,7 @@ export function useReports(timeWindow: TimeWindow, branchFilter?: string) {
         trendPercentage
       }
     };
-  }, [queryResult, staffList, timeWindow, branchFilter, userBranchId, userType]);
+  }, [queryResult, rawStaffList, timeWindow, branchFilter, userBranchId, userType]);
 
   return {
     sales,

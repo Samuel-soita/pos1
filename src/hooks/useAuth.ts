@@ -54,7 +54,7 @@ export function useAuth() {
       if (!isValid) throw new Error('Invalid or Expired Activation Token. Access Denied.');
 
       // 2. Fetch the secure randomized Business Code (e.g. A7K-9P2)
-      const { data: businessCode, error: codeError } = (await supabase.rpc('get_secure_business_code')) as { data: string | null, error: any };
+      const { data: businessCode, error: codeError } = (await supabase.rpc('get_secure_business_code')) as { data: string | null, error: { message: string } | null };
       if (codeError || !businessCode) throw new Error(`Could not generate secure business code: ${codeError?.message || 'Empty response'}`);
 
       // 3. Register the Business Owner in Supabase Auth

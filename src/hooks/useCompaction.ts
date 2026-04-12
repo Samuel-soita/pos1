@@ -14,6 +14,14 @@ interface CompactionResult {
   anomalies: string[];
 }
 
+interface CompactionItem {
+  id: string;
+  syncStatus?: string;
+  traceId?: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  [key: string]: any; // Allow for dynamic timeField access while keeping main props typed
+}
+
 export function useCompaction() {
   
   const compactTable = async (
@@ -25,6 +33,7 @@ export function useCompaction() {
     dryRun: boolean
   ): Promise<CompactionResult> => {
     const res: CompactionResult = { deleted: 0, skipped: 0, errors: 0, anomalies: [] };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const table = db[tableName] as any;
 
     try {
@@ -33,8 +42,8 @@ export function useCompaction() {
       const candidates = await table
         .where('syncStatus')
         .equals('synced')
-        .and((item: any) => item[timeField] < thresholdTime)
-        .toArray();
+        .and((item: CompactionItem) => (item[timeField] as number) < thresholdTime)
+        .toArray() as CompactionItem[];
 
       if (candidates.length === 0) return res;
 
@@ -50,9 +59,9 @@ export function useCompaction() {
       // 3. Chain & Protection Filter
       // Sort oldest first to delete in chronological order
       const toDelete = candidates
-        .sort((a: any, b: any) => a[timeField] - b[timeField])
+        .sort((a, b) => (a[timeField] as number) - (b[timeField] as number))
         .slice(0, deleteLimit)
-        .filter((item: any) => {
+        .filter((item) => {
           // Rule: Skip if in sync_queue or DLQ
           if (protectedIds.has(item.id)) {
             res.skipped++;
@@ -82,7 +91,7 @@ export function useCompaction() {
       // 5. Chunked Execution in a Transaction
       // Rollback protection is handled by Dexie transactions per batch
       for (let i = 0; i < toDelete.length; i += CHUNK_SIZE) {
-        const chunk = toDelete.slice(i, i + CHUNK_SIZE).map((item: any) => item.id);
+        const chunk = toDelete.slice(i, i + CHUNK_SIZE).map((item) => item.id);
         
         await db.transaction('rw', table, async () => {
           await table.bulkDelete(chunk);

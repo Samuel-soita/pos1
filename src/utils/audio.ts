@@ -7,7 +7,8 @@ let audioCtx: AudioContext | null = null;
 
 const initAudio = () => {
   if (!audioCtx) {
-    audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    audioCtx = new (window.AudioContext || (window as any as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
   }
   return audioCtx;
 };

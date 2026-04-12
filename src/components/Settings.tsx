@@ -5,7 +5,7 @@ import { usePrinter } from '../hooks/usePrinter';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useSync } from '../hooks/useSync';
 import { useAuth } from '../hooks/useAuth';
-import { useSubscription } from '../hooks/useSubscription';
+import { useSubscription, type Plan } from '../hooks/useSubscription';
 import { PackageSelection } from './PackageSelection';
 import { SyncDashboard } from './SyncDashboard';
 
@@ -13,10 +13,12 @@ export function Settings() {
   const [businessName, setBusinessName] = useState('');
   // useSync initializes background updates
   useSync();
-  const { connect, isConnected, deviceName, isSupported } = usePrinter();
+  const { connectBT, connectUSB, connectSerial, isConnected, deviceName, isSupported, transport } = usePrinter();
   const { userType, business } = useAuth();
   const { packages, status, daysLeft } = useSubscription();
   const [showPlanSelector, setShowPlanSelector] = useState(false);
+  
+  const typedPackages = packages as Record<string, Plan>;
 
   // Live Settings
   const taxRateSetting = useLiveQuery(() => db.settings.get('tax_rate'));
@@ -142,7 +144,7 @@ export function Settings() {
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', color: 'var(--primary)' }}>
                     <Sparkles size={18} strokeWidth={3} />
                     <span style={{ fontSize: '1.25rem', fontWeight: 900 }}>
-                      {business?.packageId ? (packages as Record<string, any>)[business.packageId]?.name : 'None'}
+                      {business?.packageId ? typedPackages[business.packageId]?.name : 'None'}
                     </span>
                   </div>
                 </div>
@@ -150,7 +152,7 @@ export function Settings() {
                 <div style={{ borderTop: '1px solid var(--border)', paddingTop: '12px' }}>
                   <p style={{ fontSize: '0.65rem', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.5px', marginBottom: '4px' }}>Monthly Cost</p>
                   <span style={{ fontSize: '1.1rem', fontWeight: 900 }}>
-                    KES {business?.packageId ? ((packages as Record<string, any>)[business.packageId]?.price || 0).toLocaleString() : '0'}
+                    KES {business?.packageId ? (typedPackages[business.packageId]?.price || 0).toLocaleString() : '0'}
                   </span>
                 </div>
               </div>
@@ -339,13 +341,32 @@ export function Settings() {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', marginBottom: '24px' }}>
             <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '12px', border: '1px solid var(--border)' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-muted)' }}>BLUETOOTH PRINTER</span>
-                <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: isConnected ? 'var(--success)' : '#cbd5e1', boxShadow: isConnected ? '0 0 8px var(--success)' : 'none' }}></div>
+                <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-muted)' }}>THERMAL PRINTER</span>
+                <div style={{ 
+                  width: '10px', 
+                  height: '10px', 
+                  borderRadius: '50%', 
+                  background: isConnected ? 'var(--success)' : '#cbd5e1', 
+                  boxShadow: isConnected ? '0 0 8px var(--success)' : 'none' 
+                }}></div>
               </div>
-              <p style={{ fontWeight: 800, fontSize: '0.9rem' }}>{isConnected ? deviceName : 'Not Connected'}</p>
-              <button className="btn-secondary" onClick={connect} style={{ width: '100%', marginTop: '12px', minHeight: '36px', fontSize: '0.8rem' }}>
-                {isConnected ? 'Change Device' : 'Connect Printer'}
-              </button>
+              <p style={{ fontWeight: 800, fontSize: '0.9rem' }}>
+                {isConnected ? `${transport}: ${deviceName}` : 'Not Connected'}
+              </p>
+              
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '12px' }}>
+                <button className="btn-secondary" onClick={connectBT} style={{ width: '100%', minHeight: '36px', fontSize: '0.8rem' }}>
+                  Connect Bluetooth
+                </button>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                  <button className="btn-secondary" onClick={connectUSB} style={{ fontSize: '0.75rem', height: '32px', padding: '0' }}>
+                    USB
+                  </button>
+                  <button className="btn-secondary" onClick={connectSerial} style={{ fontSize: '0.75rem', height: '32px', padding: '0' }}>
+                    Serial
+                  </button>
+                </div>
+              </div>
             </div>
 
             <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '12px', border: '1px solid var(--border)' }}>

@@ -7,6 +7,17 @@ import {
   Package, BarChart3, Users, Settings
 } from 'lucide-react';
 
+interface FeatureItem {
+  id: string;
+  title: string;
+  desc: string;
+  icon: React.ReactNode;
+  gradient: string;
+  badge?: string;
+  badgeColor?: string;
+  ownerOnly?: boolean;
+}
+
 export function Dashboard({ onTabChange }: { onTabChange: (tab: string) => void }) {
   const { userType } = useAuth();
   const { getLowStockProducts } = useInventory();
@@ -67,7 +78,7 @@ export function Dashboard({ onTabChange }: { onTabChange: (tab: string) => void 
 ,
   ];
 
-  const handleFeatureClick = (item: any) => {
+  const handleFeatureClick = (item: FeatureItem) => {
     onTabChange(item.id);
   };
 

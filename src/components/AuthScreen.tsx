@@ -39,10 +39,12 @@ export function AuthScreen() {
         setError(`🎉 Provisioning Successful! Store Code is: ${newBiz.code}. Please log in.`);
         success = false; // Prevents direct entry
       }
-    } catch (err: any) {
-      console.error('Auth Error Details:', err);
+    } catch (err: unknown) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const error = err as any; 
+      console.error('Auth Error Details:', error);
       // Surface the specific Supabase error message if available
-      const msg = err.message || err.error_description || 'Authentication failed';
+      const msg = error.message || error.error_description || 'Authentication failed';
       
       if (msg.includes('Email not confirmed')) {
         setError('❌ Access Denied: Please check your email and confirm your account, or disable "Confirm Email" in Supabase settings.');

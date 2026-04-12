@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useInventory } from '../hooks/useInventory';
 import { useSales } from '../hooks/useSales';
 import { useSubscription } from '../hooks/useSubscription';
@@ -10,8 +10,9 @@ import { db, type Product, type Sale } from '../db/db';
 import { usePrinter } from '../hooks/usePrinter';
 import { BarcodeScanner } from './BarcodeScanner';
 import { History } from './History';
-import { playChime } from '../utils/audio';
 import { useSyncStatus } from '../hooks/useSync';
+import { useHardwareScanner } from '../hooks/useHardwareScanner';
+import { playChime, playBeep } from '../utils/audio';
 
 export function Sales() {
   const { products } = useInventory();
@@ -39,6 +40,7 @@ export function Sales() {
   const [triggerTotalPulse, setTriggerTotalPulse] = useState(false);
   const [cashAmount, setCashAmount] = useState<string>('');
   const { staff } = useAuth();
+
 
   // Speed Optimization: Auto-focus search on mount/view change
   useEffect(() => {
@@ -74,13 +76,7 @@ export function Sales() {
     return matchesSearch && matchesCategory;
   });
 
-  const handleScanProduct = (product: Product, customPrice?: number) => {
-    const productWithPrice = { ...product, price: customPrice ?? product.price };
-    triggerSensoryFeedback(product.id!);
-    addToCart(productWithPrice);
-  };
-
-  const triggerSensoryFeedback = (productId: string) => {
+  const triggerSensoryFeedback = useCallback((productId: string) => {
     playChime();
     setGlowingProductId(productId);
     setTriggerTotalPulse(true);
@@ -88,7 +84,30 @@ export function Sales() {
       setGlowingProductId(null);
       setTriggerTotalPulse(false);
     }, 400);
-  };
+  }, []);
+
+  const handleScanProduct = useCallback((product: Product, customPrice?: number) => {
+    const productWithPrice = { ...product, price: customPrice ?? product.price };
+    triggerSensoryFeedback(product.id!);
+    addToCart(productWithPrice);
+  }, [addToCart, triggerSensoryFeedback]);
+
+  // Hardware Barcode Scanner Support - Memoized to prevent effect re-runs
+  const handleHardwareScan = useCallback(async (barcode: string) => {
+    const product = await db.products.where('barcode').equals(barcode).first();
+    if (product) {
+      if (product.quantity > 0) {
+        handleScanProduct(product);
+        playBeep(); // Distinct professional beep for hardware scanner
+      } else {
+        alert(`Product ${product.name} is out of stock!`);
+      }
+    } else {
+      console.warn("Unknown barcode scanned:", barcode);
+    }
+  }, [handleScanProduct]);
+
+  useHardwareScanner(handleHardwareScan);
 
   const executePayment = async (method: string) => {
     if (limitReached) {
@@ -127,7 +146,7 @@ export function Sales() {
           name: item.name,
           quantity: item.quantity,
           price: item.price,
-          costPrice: (item as any).costPrice || 0
+          costPrice: item.costPrice || 0
         })),
         taxRate,
         taxAmount,
@@ -136,10 +155,13 @@ export function Sales() {
         deviceId: '',
       };
       
-      // Silent attempt - never block on printer failure
+      // AUTO-PRINT Logic: Print receipt immediately without manual intervention
       try {
         setLastSale(saleToPrint as Sale);
-        if (business) await printReceipt(saleToPrint as Sale, business);
+        if (business) {
+          console.log("[POS] Auto-printing receipt for customer...");
+          await printReceipt(saleToPrint as Sale, business);
+        }
       } catch (e) {
         console.warn("Printer failed, but sale recorded:", e);
       }
