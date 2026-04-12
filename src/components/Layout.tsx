@@ -1,5 +1,5 @@
 import { useState, useEffect, type ReactNode } from 'react';
-import { Lock, X, Sparkles, Wallet, Home, LogOut } from 'lucide-react';
+import { Lock, X, Sparkles, Wallet, Home, LogOut, ArrowLeft } from 'lucide-react';
 import { usePWAUpdate } from '../hooks/usePWAUpdate';
 import { useSync, useSyncStatus } from '../hooks/useSync';
 import { useSubscription } from '../hooks/useSubscription';
@@ -178,6 +178,17 @@ export function Layout({ children, activeTab, setActiveTab }: LayoutProps) {
           zIndex: 100
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+            {activeTab !== 'dashboard' && (
+              <button 
+                onClick={() => setActiveTab('dashboard')}
+                className="btn-secondary"
+                style={{ height: '40px', padding: '0 12px', display: 'flex', alignItems: 'center', gap: '8px', border: '1px solid var(--border)' }}
+              >
+                <ArrowLeft size={18} />
+                <span className="desktop-only" style={{ fontWeight: 700 }}>Back</span>
+              </button>
+            )}
+            
             {/* Logo/Home Button */}
             <button 
               onClick={() => setActiveTab('dashboard')}

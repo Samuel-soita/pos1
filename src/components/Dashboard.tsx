@@ -33,7 +33,7 @@ export function Dashboard({ onTabChange }: { onTabChange: (tab: string) => void 
       desc: 'Process transactions & print receipts', 
       icon: <ShoppingCart size={28} />, 
       gradient: 'card-gradient-primary',
-      badge: isRegisterOpen ? 'Live' : 'Closed',
+      badge: isRegisterOpen ? 'Live' : undefined,
       badgeColor: isRegisterOpen ? 'var(--success)' : 'var(--danger)'
     },
     { 
@@ -42,7 +42,7 @@ export function Dashboard({ onTabChange }: { onTabChange: (tab: string) => void 
       desc: 'Inventory & stock management', 
       icon: <Package size={28} />, 
       gradient: 'card-gradient-amber',
-      badge: lowStock.length > 0 ? `${lowStock.length} Alerts` : 'Optimal',
+      badge: lowStock.length > 0 ? `${lowStock.length} Alerts` : undefined,
       badgeColor: lowStock.length > 0 ? 'var(--danger)' : 'var(--success)'
     },
     { 
