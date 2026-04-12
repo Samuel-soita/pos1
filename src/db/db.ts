@@ -172,6 +172,7 @@ export interface Business {
   suspendedRevenueCount: number; // Tracks 20-sale limit during suspension
   staffCount: number;
   customFeatureCount?: number;
+  enabledFeatures?: string[];
   businessType?: 'sole_proprietor' | 'multi_branch';
 }
 

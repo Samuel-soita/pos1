@@ -3,7 +3,6 @@ import { useInventory } from '../hooks/useInventory';
 import { useCashControl } from '../hooks/useCashControl';
 import { 
   ShoppingCart, Receipt,
-  ChevronRight,
   Package, BarChart3, Users, Settings
 } from 'lucide-react';
 
@@ -19,10 +18,12 @@ interface FeatureItem {
 }
 
 export function Dashboard({ onTabChange }: { onTabChange: (tab: string) => void }) {
-  const { userType } = useAuth();
+  const { userType, business, staff } = useAuth();
   const { getLowStockProducts } = useInventory();
   const { isRegisterOpen } = useCashControl();
   const lowStock = getLowStockProducts?.() || [];
+
+  const displayName = userType === 'staff' ? staff?.firstName : business?.name;
 
 
   const features = [
@@ -83,9 +84,14 @@ export function Dashboard({ onTabChange }: { onTabChange: (tab: string) => void 
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: '24px', paddingBottom: '40px', paddingTop: '20px' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', paddingBottom: '80px' }}>
+      <header className="welcome-section welcome-greeting">
+        <h1 className="welcome-title">Hello, {displayName || 'Partner'}</h1>
+        <p className="welcome-subtitle">What would you like to manage today?</p>
+      </header>
+
       {/* THE MASTER HUB (The Feature Grid Only) */}
-      <section>
+      <section style={{ padding: '0 20px', width: '100%' }}>
         <div className="hub-grid">
           {features.map((item) => {
             if (item.ownerOnly && userType !== 'owner') return null;
@@ -93,33 +99,21 @@ export function Dashboard({ onTabChange }: { onTabChange: (tab: string) => void 
             return (
                 <div 
                   key={item.id} 
-                  className={`hub-card ${item.gradient}`}
+                  className="hub-card-wrapper"
                   onClick={() => handleFeatureClick(item)}
+                  title={item.desc}
                 >
-                  <div className="hub-card-icon">
-                    <div style={{ color: 'var(--text)' }}>{item.icon}</div>
-                  </div>
-                  <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <h4 className="hub-card-title">{item.title}</h4>
-                      {item.badge && (
-                        <span style={{ 
-                          fontSize: '0.65rem', 
-                          fontWeight: 900, 
-                          background: 'rgba(255,255,255,0.2)', 
-                          padding: '4px 8px', 
-                          borderRadius: '6px',
-                          textTransform: 'uppercase'
-                        }}>
-                          {item.badge}
-                        </span>
-                      )}
+                  <div className="hub-card">
+                    <div className="hub-card-icon">
+                      <div>{item.icon}</div>
                     </div>
-                    <p className="hub-card-desc">{item.desc}</p>
+                    {item.badge && (
+                      <span className="hub-card-badge">
+                        {item.badge}
+                      </span>
+                    )}
                   </div>
-                  <div style={{ marginTop: 'auto', alignSelf: 'flex-end', opacity: 0.6 }}>
-                    <ChevronRight size={20} />
-                  </div>
+                  <h4 className="hub-card-title">{item.title}</h4>
                 </div>
             );
           })}

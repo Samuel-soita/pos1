@@ -77,8 +77,7 @@ export function Expenses({ initialView }: { initialView?: string }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
       <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
-          <h1 style={{ fontSize: '2rem', fontWeight: 800 }}>Expense Management</h1>
-          <p style={{ color: 'var(--text-muted)' }}>Track operational costs and recurring bills.</p>
+          <h1 style={{ fontSize: '2rem', fontWeight: 800 }}>Expenses</h1>
         </div>
         <div style={{ display: 'flex', gap: '12px' }}>
           <button className="btn-secondary" onClick={() => setShowRecurringModal(true)}>
@@ -359,8 +358,7 @@ function QuickLog({ businessId }: { businessId: string }) {
         <div style={{ background: '#f1f5f9', width: '64px', height: '64px', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
           <Receipt size={32} color="var(--primary)" />
         </div>
-        <h2 style={{ fontSize: '1.5rem', fontWeight: 800 }}>Quick Log Expense</h2>
-        <p style={{ color: 'var(--text-muted)' }}>Log day-to-day costs instantly. Only Owners can view history.</p>
+        <h2 style={{ fontSize: '1.5rem', fontWeight: 800 }}>Quick Log</h2>
       </div>
 
       <div className="card">
@@ -375,7 +373,7 @@ function QuickLog({ businessId }: { businessId: string }) {
         ) : (
           <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
             <div className="input-group">
-              <label>What are you paying for? (e.g. Transport, Lunch)</label>
+              <label>Description</label>
               <input value={title} onChange={e => setTitle(e.target.value)} placeholder="Description..." required />
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>

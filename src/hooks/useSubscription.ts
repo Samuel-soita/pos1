@@ -12,6 +12,15 @@ export interface Plan {
   features: string[];
 }
 
+export const MODULAR_FEATURES = {
+  inventory_alerts: { id: 'inventory_alerts', name: 'Inventory Alerts', price: 200, icon: 'Package', desc: 'Low stock alerts & automated reorder lists' },
+  branch_management: { id: 'branch_management', name: 'Branch Management', price: 500, icon: 'GitMerge', desc: 'Multi-branch sync & central inventory control' },
+  shift_tracking: { id: 'shift_tracking', name: 'Shift Tracking', price: 300, icon: 'Clock', desc: 'Track staff clock-in/out & register handovers' },
+  advanced_analytics: { id: 'advanced_analytics', name: 'Advanced Analytics', price: 600, icon: 'BarChart3', desc: 'Deep profit analysis & custom forecast reports' },
+  excel_exports: { id: 'excel_exports', name: 'Full Excel Exports', price: 400, icon: 'Download', desc: 'Unlimited data exports for external bookkeeping' },
+  receipt_customization: { id: 'receipt_customization', name: 'Pro Receipt Header', price: 200, icon: 'Printer', desc: 'Add complex logos & custom footers to receipts' }
+};
+
 export function useSubscription() {
   const { business } = useAuth();
   const [now, setNow] = useState(() => Date.now());
@@ -115,6 +124,12 @@ export function useSubscription() {
       name: 'Max Enterprise', 
       price: 3500, 
       features: ['Advanced Analytics', 'Unlimited Devices', 'Priority Support', 'Full Excel Exports'] 
+    },
+    custom: {
+      id: 'custom',
+      name: 'Custom Build',
+      price: 0,
+      features: []
     }
   };
 
@@ -126,15 +141,45 @@ export function useSubscription() {
   // Extra staff cost (Owner is free, staff 150/mo each)
   const staffCost = staffCount * 150;
 
-  // Custom features added by engineer (KES 200/mo each)
-  const customFeaturesCost = (business?.customFeatureCount || 0) * 200;
+  // Custom features added by engineer (Legacy count mechanism)
+  const legacyCustomCost = (business?.customFeatureCount || 0) * 200;
+
+  // New Modular Features Cost
+  const enabledFeatures = business?.enabledFeatures || [];
+  const modularCost = enabledFeatures.reduce((acc, featId) => {
+    const feat = MODULAR_FEATURES[featId as keyof typeof MODULAR_FEATURES];
+    return acc + (feat?.price || 0);
+  }, 0);
+
+  const toggleFeature = async (featureId: string) => {
+    if (!business) return;
+    const current = business.enabledFeatures || [];
+    const updated = current.includes(featureId) 
+      ? current.filter(id => id !== featureId)
+      : [...current, featureId];
+    await db.businesses.update(business.id, { enabledFeatures: updated });
+  };
+
+  const updatePlan = async (packageId: string, features?: string[]) => {
+    if (!business) return;
+    await db.businesses.update(business.id, { 
+      packageId, 
+      enabledFeatures: features ?? business.enabledFeatures 
+    });
+  };
+
+  const totalMonthly = (business?.packageId ? (packages as Record<string, Plan>)[business.packageId]?.price || 0 : 0) + 
+                       staffCost + legacyCustomCost + modularCost;
 
   return { 
     ...statusInfo, 
     packages, 
     staffCount, 
     staffCost, 
-    customFeaturesCost,
-    totalMonthly: (business?.packageId ? (packages as Record<string, Plan>)[business.packageId]?.price || 0 : 0) + staffCost + customFeaturesCost
+    modularCost,
+    totalMonthly,
+    toggleFeature,
+    updatePlan,
+    enabledFeatures
   };
 }

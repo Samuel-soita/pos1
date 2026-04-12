@@ -102,7 +102,6 @@ export function Settings() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
       <header>
         <h1 style={{ fontSize: '2rem', fontWeight: 800 }}>Store Settings</h1>
-        <p style={{ color: 'var(--text-muted)' }}>Manage your business information, taxes, and security.</p>
       </header>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 320px), 1fr))', gap: '24px' }}>
@@ -116,7 +115,6 @@ export function Settings() {
                   <CreditCard size={20} color="var(--primary)" />
                   Subscription & Billing
                 </h2>
-                <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Manage your plan and business billing.</p>
               </div>
               <div style={{ background: status === 'active' ? 'rgba(34, 197, 94, 0.1)' : 'rgba(239, 68, 68, 0.1)', color: status === 'active' ? '#166534' : '#991b1b', padding: '6px 12px', borderRadius: '10px', fontWeight: 800, fontSize: '0.8rem' }}>
                 {status.toUpperCase()} {daysLeft > 0 && `(${daysLeft}d left)`}
@@ -252,9 +250,6 @@ export function Settings() {
             <ShieldCheck size={24} color="var(--primary)" />
             Staff Security Mode
           </h2>
-          <p style={{ marginBottom: '20px', color: 'var(--text-muted)' }}>
-            Are you handing this tablet to an employee? Enable Staff Mode to restrict access to Inventory and Reports.
-          </p>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 250px), 1fr))', gap: '16px', marginBottom: '24px' }}>
             <div 

@@ -169,8 +169,7 @@ export function Inventory() {
 
       <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
         <div>
-          <h1 style={{ fontSize: '2rem', fontWeight: 800 }}>My Store Management</h1>
-          <p style={{ color: 'var(--text-muted)' }}>Track and manage your products and stock levels.</p>
+          <h1 style={{ fontSize: '2rem', fontWeight: 800 }}>Inventory</h1>
         </div>
         <div style={{ display: 'flex', gap: '12px' }}>
           <div style={{ position: 'relative' }}>
@@ -184,17 +183,16 @@ export function Inventory() {
             <label 
               htmlFor="csv-import" 
               className="btn-secondary" 
-              style={{ padding: '0 16px', height: '44px', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}
-              title="Upload CSV"
+              style={{ padding: '0 12px', height: '44px', display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}
+              title="Import CSV"
             >
               <Upload size={20} />
-              <span className="desktop-only">Import CSV</span>
             </label>
           </div>
           <button 
             className="btn-secondary" 
             onClick={handleDownloadTemplate}
-            style={{ padding: '0 16px', height: '44px' }}
+            style={{ padding: '0 12px', height: '44px' }}
             title="Download Template"
           >
             <FileText size={20} />
@@ -202,10 +200,10 @@ export function Inventory() {
           <button 
             className="btn-secondary" 
             onClick={handleExport}
-            style={{ padding: '0 16px', height: '44px' }}
+            style={{ padding: '0 12px', height: '44px' }}
+            title="Export CSV"
           >
             <Download size={20} />
-            <span className="desktop-only">Export CSV</span>
           </button>
           <button 
             className="btn-primary" 

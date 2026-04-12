@@ -476,7 +476,6 @@ export function Sales() {
 
             {paymentMethod === 'Cash' && (
               <div style={{ marginBottom: '24px' }}>
-                <label style={{ fontWeight: 800, marginBottom: '12px' }}>Quick Cash Selection</label>
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px', marginBottom: '16px' }}>
                   {[100, 200, 500, 1000].map(amt => (
                     <button 
@@ -533,9 +532,8 @@ export function Sales() {
 
               {paymentMethod === 'M-Pesa' && (
                 <div className="fade-in" style={{ background: '#f0fdf4', padding: '24px', borderRadius: '16px', border: '1px solid #dcfce7' }}>
-                   <p style={{ fontWeight: 700, color: '#166534', marginBottom: '8px' }}>Payment Instructions:</p>
                    <p style={{ fontSize: '1.25rem', fontWeight: 800, color: '#15803d' }}>Send KES {cartTotal.toFixed(2)} to 0768640343</p>
-                   <p style={{ fontSize: '0.875rem', color: '#166534', marginBottom: '20px' }}>Name: SAMUEL SOITA</p>
+                   <p style={{ fontSize: '0.875rem', color: '#166534', marginBottom: '16px' }}>SAMUEL SOITA</p>
                    
                    <div className="input-group" style={{ marginBottom: 0 }}>
                      <label style={{ color: '#166534', fontWeight: 700 }}>M-Pesa Transaction Code</label>

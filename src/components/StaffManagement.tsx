@@ -165,7 +165,6 @@ export function StaffManagement({ initialView }: { initialView?: string }) {
 
       <header>
         <h1 style={{ fontSize: '2rem', fontWeight: 800 }}>Staff Management</h1>
-        <p style={{ color: 'var(--text-muted)' }}>Manage your employees and their access codes. Each staff member costs 150 KES/mo.</p>
       </header>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(350px, 1fr))', gap: '32px' }}>
