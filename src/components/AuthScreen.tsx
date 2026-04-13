@@ -14,6 +14,7 @@ export function AuthScreen() {
   const [ownerEmail, setOwnerEmail] = useState('');
   const [staffCode, setStaffCode] = useState('');
   const [pin, setPin] = useState('');
+  const [confirmPin, setConfirmPin] = useState('');
   const [activationToken, setActivationToken] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -32,10 +33,14 @@ export function AuthScreen() {
         await staffLogin(staffCode, pin);
         success = true;
       } else if (authMode === 'provisioning') {
+        if (pin !== confirmPin) {
+          throw new Error('PIN inputs do not match. Please try again.');
+        }
         const newBiz = await provisionBusiness(activationToken, businessName, pin, ownerEmail);
         setAuthMode('business');
         setBusinessCode(newBiz.code); // Pre-fill for convenience
-        setPin(''); // Require PIN to be entered again
+        setPin(''); 
+        setConfirmPin('');
         setError(`🎉 Provisioning Successful! Store Code is: ${newBiz.code}. Please log in.`);
         success = false; // Prevents direct entry
       }
@@ -237,6 +242,23 @@ export function AuthScreen() {
               </div>
             </div>
 
+            {authMode === 'provisioning' && (
+              <div className="input-group">
+                <label style={{ fontWeight: 700 }}>Confirm Owner PIN</label>
+                <div className="input-icon-wrapper">
+                  <input 
+                    required 
+                    type="password" 
+                    maxLength={4}
+                    placeholder="••••"
+                    value={confirmPin} 
+                    onChange={e => setConfirmPin(e.target.value.replace(/\D/g, ''))} 
+                  />
+                  <Lock className="input-icon" size={20} />
+                </div>
+              </div>
+            )}
+
             <button type="submit" className="btn-primary" disabled={loading} style={{ 
               height: '64px',
               fontSize: '1.2rem',
@@ -265,15 +287,17 @@ export function AuthScreen() {
                  Cancel Provisioning
                </button>
              ) : (
-               <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
-                 New device setup? 
-                 <button 
-                   onClick={() => setAuthMode('provisioning')} 
-                   style={{ background: 'transparent', padding: '0 8px', color: 'var(--primary)', fontWeight: 800 }}
-                 >
-                   Admin Provisioning
-                 </button>
-               </p>
+                !localStorage.getItem('pinned_biz_code') ? (
+                  <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+                    New device setup? 
+                    <button 
+                      onClick={() => setAuthMode('provisioning')} 
+                      style={{ background: 'transparent', padding: '0 8px', color: 'var(--primary)', fontWeight: 800 }}
+                    >
+                      Admin Provisioning
+                    </button>
+                  </p>
+                ) : null
              )}
           </div>
         </div>

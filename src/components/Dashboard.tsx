@@ -2,9 +2,10 @@ import { useAuth } from '../hooks/useAuth';
 import { useInventory } from '../hooks/useInventory';
 import { useCashControl } from '../hooks/useCashControl';
 import { 
-  ShoppingCart, Receipt,
-  Package, BarChart3, Users, Settings
+  ShoppingCart, Receipt, Truck,
+  Package, BarChart3, Users, Settings, Lock
 } from 'lucide-react';
+import { useLayout } from './Layout';
 
 interface FeatureItem {
   id: string;
@@ -14,19 +15,18 @@ interface FeatureItem {
   gradient: string;
   badge?: string;
   badgeColor?: string;
-  ownerOnly?: boolean;
 }
 
 export function Dashboard({ onTabChange }: { onTabChange: (tab: string) => void }) {
   const { userType, business, staff } = useAuth();
   const { getLowStockProducts } = useInventory();
   const { isRegisterOpen } = useCashControl();
+  const { requestAuth } = useLayout();
   const lowStock = getLowStockProducts?.() || [];
 
   const displayName = userType === 'staff' ? staff?.firstName : business?.name;
 
-
-  const features = [
+  const features: FeatureItem[] = [
     { 
       id: 'sales', 
       title: 'Sales', 
@@ -46,20 +46,25 @@ export function Dashboard({ onTabChange }: { onTabChange: (tab: string) => void 
       badgeColor: lowStock.length > 0 ? 'var(--danger)' : 'var(--success)'
     },
     { 
+      id: 'procurement', 
+      title: 'Suppliers and Purchases', 
+      desc: 'Suppliers & bulk restocking', 
+      icon: <Truck size={28} />, 
+      gradient: 'card-gradient-success'
+    },
+    { 
       id: 'reports', 
       title: 'Reports', 
       desc: 'Sales performance & profit metrics', 
       icon: <BarChart3 size={28} />, 
-      gradient: 'card-gradient-success',
-      ownerOnly: true 
+      gradient: 'card-gradient-success'
     },
     { 
       id: 'staff', 
-      title: 'Team', 
+      title: 'Staff Management', 
       desc: 'Staff roles, PINs & permissions', 
       icon: <Users size={28} />, 
-      gradient: 'card-gradient-slate',
-      ownerOnly: true 
+      gradient: 'card-gradient-slate'
     },
     { 
       id: 'expenses', 
@@ -73,14 +78,20 @@ export function Dashboard({ onTabChange }: { onTabChange: (tab: string) => void 
       title: 'Settings', 
       desc: 'Business profile & POS config', 
       icon: <Settings size={28} />, 
-      gradient: 'card-gradient-slate',
-      ownerOnly: true 
+      gradient: 'card-gradient-slate'
     }
-,
   ];
 
   const handleFeatureClick = (item: FeatureItem) => {
-    onTabChange(item.id);
+    // Dynamic Permission Check:
+    // If user is staff, check if the business has explicitly disabled this tab.
+    const isRestricted = userType === 'staff' && business?.staffPermissions?.[item.id] === false;
+
+    if (isRestricted) {
+      requestAuth(() => onTabChange(item.id));
+    } else {
+      onTabChange(item.id);
+    }
   };
 
   return (
@@ -94,26 +105,37 @@ export function Dashboard({ onTabChange }: { onTabChange: (tab: string) => void 
       <section style={{ padding: '0 20px', width: '100%' }}>
         <div className="hub-grid">
           {features.map((item) => {
-            if (item.ownerOnly && userType !== 'owner') return null;
+            const isLocked = userType === 'staff' && business?.staffPermissions?.[item.id] === false;
             
             return (
                 <div 
                   key={item.id} 
                   className="hub-card-wrapper"
                   onClick={() => handleFeatureClick(item)}
-                  title={item.desc}
+                  title={isLocked ? 'Restricted: Owner Access Required' : item.desc}
+                  style={{ opacity: isLocked ? 0.7 : 1 }}
                 >
-                  <div className="hub-card">
+                  <div className="hub-card" style={{ 
+                    background: isLocked ? 'var(--secondary)' : undefined,
+                    filter: isLocked ? 'grayscale(0.5)' : 'none'
+                  }}>
                     <div className="hub-card-icon">
                       <div>{item.icon}</div>
                     </div>
-                    {item.badge && (
+                    {isLocked && (
+                      <div style={{ position: 'absolute', bottom: '-5px', right: '-5px', background: 'var(--danger)', color: 'white', padding: '6px', borderRadius: '50%', display: 'flex', border: '2px solid white', boxShadow: '0 2px 8px rgba(0,0,0,0.2)' }}>
+                        <Lock size={12} fill="currentColor" />
+                      </div>
+                    )}
+                    {item.badge && !isLocked && (
                       <span className="hub-card-badge">
                         {item.badge}
                       </span>
                     )}
                   </div>
-                  <h4 className="hub-card-title">{item.title}</h4>
+                  <h4 className="hub-card-title" style={{ color: isLocked ? 'var(--secondary)' : 'var(--text)' }}>
+                    {item.title}
+                  </h4>
                 </div>
             );
           })}

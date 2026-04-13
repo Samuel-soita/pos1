@@ -13,8 +13,10 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from './db/db';
 import { Sparkles, CheckCircle2 } from 'lucide-react';
 
+import { Dashboard } from './components/Dashboard';
+import { AuthScreen } from './components/AuthScreen';
+
 // Lazy load feature components
-const Dashboard = lazy(() => import('./components/Dashboard').then(module => ({ default: module.Dashboard })));
 const Sales = lazy(() => import('./components/Sales').then(module => ({ default: module.Sales })));
 const Inventory = lazy(() => import('./components/Inventory').then(module => ({ default: module.Inventory })));
 const History = lazy(() => import('./components/History').then(module => ({ default: module.History })));
@@ -22,9 +24,10 @@ const Settings = lazy(() => import('./components/Settings').then(module => ({ de
 const Reports = lazy(() => import('./components/Reports').then(module => ({ default: module.Reports })));
 const Expenses = lazy(() => import('./components/Expenses').then(module => ({ default: module.Expenses })));
 const StaffManagement = lazy(() => import('./components/StaffManagement').then(module => ({ default: module.StaffManagement })));
-const AuthScreen = lazy(() => import('./components/AuthScreen').then(module => ({ default: module.AuthScreen })));
 const PackageSelection = lazy(() => import('./components/PackageSelection').then(module => ({ default: module.PackageSelection })));
 const SyncDashboard = lazy(() => import('./components/SyncDashboard').then(module => ({ default: module.SyncDashboard })));
+const Procurement = lazy(() => import('./components/Procurement').then(module => ({ default: module.Procurement })));
+
 
 function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -84,12 +87,12 @@ function App() {
       const timer = setTimeout(() => {
         import('./components/Sales');
         import('./components/Inventory');
-        import('./components/Dashboard');
         import('./components/Settings');
         import('./components/Reports');
         import('./components/Expenses');
         import('./components/StaffManagement');
         import('./components/History');
+        import('./components/Procurement');
       }, 1500); // 1.5 seconds after boot (when the network is quiet)
       return () => clearTimeout(timer);
     }
@@ -127,6 +130,8 @@ function App() {
         return <Sales />;
       case 'inventory':
         return <Inventory />;
+      case 'procurement':
+        return <Procurement />;
       case 'staff':
         return <StaffManagement />;
       case 'history':

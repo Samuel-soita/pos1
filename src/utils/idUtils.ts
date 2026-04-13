@@ -6,7 +6,7 @@ import { db } from '../db/db';
  * Example: ORD-0001-DEV-A1B2-X9F-1024
  */
 export async function generateTraceableId(
-  type: 'ORD' | 'EXP' | 'PRD' | 'STF' | 'SHIFT' | 'BRH' | 'CASH' | 'INV' | 'LED' | 'EVT',
+  type: 'ORD' | 'EXP' | 'PRD' | 'STF' | 'SHIFT' | 'BRH' | 'CASH' | 'INV' | 'LED' | 'EVT' | 'SUP' | 'PUR' | 'SYS',
   businessId: string,
   businessCode: string,
   deviceId: string

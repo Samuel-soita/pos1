@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS public.provisioning_audit (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     token_id UUID REFERENCES public.activation_tokens(id),
     business_id UUID, 
+    business_code TEXT, -- NEW: Explicit registry column
     engineer_id TEXT, 
     device_metadata JSONB,
     provisioned_at TIMESTAMPTZ DEFAULT now()
@@ -100,6 +101,23 @@ BEGIN
     RETURN FALSE;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- 5. Business Code Resolver (Enables Email-less Login)
+CREATE OR REPLACE FUNCTION resolve_business_email(p_code TEXT)
+RETURNS TEXT AS $$
+DECLARE
+    v_email TEXT;
+BEGIN
+    SELECT owner_email INTO v_email
+    FROM public.businesses
+    WHERE code = p_code
+    LIMIT 1;
+
+    RETURN v_email;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+GRANT EXECUTE ON FUNCTION resolve_business_email(TEXT) TO anon, authenticated;
 
 GRANT EXECUTE ON FUNCTION validate_provisioning_token(TEXT) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION get_secure_business_code() TO anon, authenticated;

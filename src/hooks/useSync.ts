@@ -109,18 +109,37 @@ export function useSync() {
       const setting = await db.settings.get('last_synced');
       const lastSynced = (setting?.value as number) || 0;
 
-      // Phase 3: Cursor Pagination Pull (High Performance / Free Tier Safe)
-      const { data: incomingEvents, error: fetchErr } = await supabase
-        .from('pos_events')
-        .select('event_id, business_id, staff_id, event_type, payload, client_timestamp, server_timestamp, hash')
-        .eq('business_id', bizId)
-        .gt('server_timestamp', lastSynced)
-        .order('server_timestamp', { ascending: true })
-        .limit(1000); // Batched fetch to prevent memory freeze
-      
-      if (!fetchErr && incomingEvents && incomingEvents.length > 0) {
-        // Transform incoming events to local format
-        const mappedEvents = incomingEvents.map(p => ({
+      const fetchBatch = async (afterTimestamp: number) => {
+        const { data, error } = await supabase
+          .from('pos_events')
+          .select('event_id, business_id, staff_id, event_type, payload, client_timestamp, server_timestamp, hash')
+          .eq('business_id', bizId)
+          .gt('server_timestamp', afterTimestamp)
+          .order('server_timestamp', { ascending: true })
+          .limit(1000);
+        
+        if (error) throw error;
+        return data || [];
+      };
+
+      let currentCursor = lastSynced;
+      let hasMore = true;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let allIncoming: any[] = [];
+
+      while (hasMore) {
+        const batch = await fetchBatch(currentCursor);
+        if (batch.length === 0) {
+          hasMore = false;
+        } else {
+          allIncoming = [...allIncoming, ...batch];
+          currentCursor = batch[batch.length - 1].server_timestamp;
+          if (batch.length < 1000) hasMore = false;
+        }
+      }
+
+      if (allIncoming.length > 0) {
+        const mappedEvents = allIncoming.map(p => ({
             event_id: p.event_id,
             business_id: p.business_id,
             staff_id: p.staff_id,
@@ -198,6 +217,23 @@ export function useSync() {
               case 'BRANCH_DELETED':
                 await db.branches.delete(payload.id);
                 break;
+              case 'SUPPLIER_CREATED':
+              case 'SUPPLIER_UPDATED':
+                await db.suppliers.put(payload);
+                break;
+              case 'SUPPLIER_DELETED':
+                await db.suppliers.delete(payload.id);
+                break;
+              case 'PURCHASE_CREATED':
+                await db.purchases.put(payload);
+                // Materialize Restocking
+                for (const item of payload.items) {
+                  await db.products.where('id').equals(item.productId).modify(p => {
+                    p.quantity += item.quantity;
+                    p.updatedAt = Date.now();
+                  });
+                }
+                break;
 
               // --- Control Systems ---
               case 'SHIFT_STARTED':
@@ -213,12 +249,19 @@ export function useSync() {
               case 'RECURRING_EXPENSE_UPDATED':
                 await db.recurring_expenses.put(payload);
                 break;
-              case 'BUSINESS_UPDATED':
-                await db.businesses.update(payload.id, payload);
+              case 'BUSINESS_UPDATED': {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                const updatePayload: Record<string, any> = { ...payload };
+                if (payload.staff_permissions) {
+                  updatePayload.staffPermissions = payload.staff_permissions;
+                  delete updatePayload.staff_permissions;
+                }
+                await db.businesses.update(payload.id, updatePayload);
                 if (payload.name) {
                   await db.settings.put({ key: 'business_name', value: payload.name });
                 }
                 break;
+              }
               case 'SETTING_UPDATED':
                 await db.settings.put({ key: payload.key, value: payload.value });
                 break;
@@ -237,7 +280,7 @@ export function useSync() {
           }
 
           // 4. Update sync cursor
-          const maxServerTime = Math.max(...incomingEvents.map(e => e.server_timestamp));
+          const maxServerTime = Math.max(...allIncoming.map(e => e.server_timestamp));
           await db.settings.put({ key: 'last_synced', value: maxServerTime });
         });
       }
@@ -246,7 +289,7 @@ export function useSync() {
       // Silently refresh the business status from the cloud to detect manual engineer unlocks
       const { data: remoteBiz } = await supabase
         .from('businesses')
-        .select('package_id, expiry_date, status, staff_count, custom_feature_count, enabled_features, trial_used, suspended_revenue_count')
+        .select('package_id, expiry_date, status, staff_count, custom_feature_count, enabled_features, staff_permissions, trial_used, suspended_revenue_count')
         .eq('id', bizId)
         .maybeSingle();
 
@@ -258,6 +301,8 @@ export function useSync() {
           staffCount: remoteBiz.staff_count,
           customFeatureCount: remoteBiz.custom_feature_count,
           enabledFeatures: remoteBiz.enabled_features,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          staffPermissions: (remoteBiz as any).staff_permissions,
           trialUsed: remoteBiz.trial_used,
           suspendedRevenueCount: remoteBiz.suspended_revenue_count
         });
@@ -279,12 +324,54 @@ export function useSync() {
     setSyncError(null);
     try {
       await pushLocalChanges();
+      
+      const isInitialSync = !localStorage.getItem('initial_sync_done');
       await pullRemoteChanges();
+      
+      if (isInitialSync) {
+        localStorage.setItem('initial_sync_done', 'true');
+      }
     } finally {
       isSyncingRef.current = false;
       setIsSyncing(false);
     }
   }, []); 
+
+  const rebuildState = useCallback(async () => {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return;
+
+    setIsSyncing(true);
+    try {
+      await db.transaction('rw', [
+        db.products, db.sales, db.expenses, db.shifts, 
+        db.cash_logs, db.staff, db.branches, db.recurring_expenses, 
+        db.snapshots, db.settings
+      ], async () => {
+        // Clear everything except events
+        await db.products.clear();
+        await db.sales.clear();
+        await db.expenses.clear();
+        await db.shifts.clear();
+        await db.cash_logs.clear();
+        await db.staff.clear();
+        await db.branches.clear();
+        await db.recurring_expenses.clear();
+        await db.snapshots.clear();
+        await db.settings.where('key').equals('last_synced').delete();
+      });
+
+      // Reset sync cursor and pull all again
+      localStorage.removeItem('initial_sync_done');
+      await syncAll();
+      
+      console.log("[ESA] State successfully reconstructed from ledger.");
+    } catch (err) {
+      console.error("Reconstruction failed:", err);
+    } finally {
+      setIsSyncing(false);
+    }
+  }, [syncAll]);
 
   useEffect(() => {
     if (isOnline) syncAll();
@@ -294,7 +381,8 @@ export function useSync() {
     isOnline,
     isSyncing,
     syncError,
-    syncAll
+    syncAll,
+    rebuildState
   };
 }
 

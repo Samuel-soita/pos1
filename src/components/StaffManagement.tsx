@@ -196,6 +196,42 @@ export function StaffManagement({ initialView }: { initialView?: string }) {
     }
   };
 
+  const togglePermission = async (permId: string) => {
+    if (!business || !businessId) return;
+    
+    const currentPerms = business.staffPermissions || {
+      inventory: true, expenses: true, reports: false, staff: false, settings: false, procurement: false
+    };
+    
+    const newPerms = { ...currentPerms, [permId]: !currentPerms[permId] };
+    const deviceId = await getDeviceId();
+
+    // Optimistic Update locally
+    await db.transaction('rw', [db.businesses, db.pos_events], async () => {
+      await db.businesses.update(businessId, { staffPermissions: newPerms });
+      await db.pos_events.add({
+        event_id: await generateTraceableId('SYS', businessId, business.code, deviceId),
+        business_id: businessId,
+        staff_id: 'owner',
+        event_type: 'BUSINESS_UPDATED',
+        payload: { id: businessId, staff_permissions: newPerms },
+        client_timestamp: Date.now(),
+        server_timestamp: 0,
+        hash: 'LATER',
+        sync_status: 'pending'
+      });
+    });
+  };
+
+  const permissionsList = [
+    { id: 'inventory', label: 'Stocks & Inventory', desc: 'Allow staff to see and count stock' },
+    { id: 'expenses', label: 'Expenses', desc: 'Allow staff to view/record expenses' },
+    { id: 'procurement', label: 'Suppliers and Purchases', desc: 'Suppliers & bulk restocking access' },
+    { id: 'reports', label: 'Reports', desc: 'Allow staff to see sales reports' },
+    { id: 'staff', label: 'Staff Management', desc: 'Allow managers to view shift logs' },
+    { id: 'settings', label: 'Settings', desc: 'Access to business profile & PINs' },
+  ];
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
       {/* 1. Register Control Banner (Migrated from Dashboard) */}
@@ -385,6 +421,60 @@ export function StaffManagement({ initialView }: { initialView?: string }) {
             {branches.length === 0 && (
               <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>No branches defined yet.</p>
             )}
+          </div>
+        </div>
+
+        {/* 4. Staff Access Control Section (OWNER ONLY) */}
+        <div className="card" style={{ gridColumn: '1 / -1' }}>
+          <h2 style={{ fontSize: '1.5rem', fontWeight: 700, marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <ShieldCheck size={24} color="var(--primary)" />
+            Staff Access Control
+          </h2>
+          <p style={{ color: 'var(--text-muted)', marginBottom: '24px', fontSize: '0.9rem' }}>
+            Choose which modules your staff can access. Permissions apply globally to all staff devices.
+          </p>
+          
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '20px' }}>
+            {permissionsList.map((perm) => {
+              const isEnabled = business?.staffPermissions?.[perm.id] ?? false;
+              return (
+                <div 
+                  key={perm.id} 
+                  onClick={() => togglePermission(perm.id)}
+                  style={{ 
+                    padding: '20px', 
+                    borderRadius: '16px', 
+                    border: '2px solid', 
+                    borderColor: isEnabled ? 'var(--primary)' : 'var(--border)',
+                    background: isEnabled ? '#eff6ff' : 'white',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s ease',
+                    position: 'relative'
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
+                    <div style={{ fontWeight: 800, fontSize: '1rem', color: isEnabled ? 'var(--primary)' : 'var(--text)' }}>
+                      {perm.label}
+                    </div>
+                    <div style={{ 
+                      width: '24px', 
+                      height: '24px', 
+                      borderRadius: '50%', 
+                      background: isEnabled ? 'var(--primary)' : 'var(--border)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      color: 'white'
+                    }}>
+                      {isEnabled ? '✓' : ''}
+                    </div>
+                  </div>
+                  <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: 0, lineHeight: 1.4 }}>
+                    {perm.desc}
+                  </p>
+                </div>
+              );
+            })}
           </div>
         </div>
 

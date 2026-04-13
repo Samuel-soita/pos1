@@ -104,12 +104,24 @@ export interface Sale {
   syncStatus?: 'pending' | 'synced' | 'failed';
 }
 
+export interface Supplier {
+  id: string; // UUID
+  businessId: string;
+  name: string;
+  contactPerson?: string;
+  phone?: string;
+  email?: string;
+  kraPin?: string;
+}
+
 export interface Purchase {
   id: string; // UUID
   businessId: string;
+  supplierId?: string;
   total: number;
   timestamp: number;
   items: Array<{ productId: string; name: string; quantity: number; price: number }>;
+  paymentStatus: 'paid' | 'pending' | 'partial';
   syncStatus?: 'pending' | 'synced' | 'failed';
 }
 
@@ -174,6 +186,7 @@ export interface Business {
   staffCount: number;
   customFeatureCount?: number;
   enabledFeatures?: string[];
+  staffPermissions?: Record<string, boolean>;
   businessType?: 'sole_proprietor' | 'multi_branch';
 }
 
@@ -210,6 +223,7 @@ const db = new Dexie('POSDatabase') as Dexie & {
   products: EntityTable<Product, 'id'>;
   sales: EntityTable<Sale, 'id'>;
   purchases: EntityTable<Purchase, 'id'>;
+  suppliers: EntityTable<Supplier, 'id'>;
   expenses: EntityTable<Expense, 'id'>;
   recurring_expenses: EntityTable<RecurringExpense, 'id'>;
   businesses: EntityTable<Business, 'id'>;
@@ -224,10 +238,11 @@ const db = new Dexie('POSDatabase') as Dexie & {
   snapshots: EntityTable<MaterializedSnapshot, 'id'>;
 };
 
-db.version(21).stores({
+db.version(22).stores({
   products: 'id, businessId, branchId, name, price, costPrice, quantity, category, barcode, syncStatus',
   sales: 'id, businessId, branchId, total, totalProfit, timestamp, receiptId, paymentMethod, deviceId, syncStatus',
-  purchases: 'id, businessId, branchId, total, timestamp, syncStatus',
+  purchases: 'id, businessId, branchId, supplierId, total, timestamp, syncStatus',
+  suppliers: 'id, businessId, name, phone, syncStatus',
   expenses: 'id, businessId, branchId, timestamp, category, status, syncStatus',
   recurring_expenses: 'id, businessId, branchId, frequency, nextRun, isActive, syncStatus',
   businesses: 'id, code, name, packageId, [name+code+pin], syncStatus',

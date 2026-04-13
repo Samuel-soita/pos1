@@ -13,13 +13,19 @@ export function useReports(timeWindow: TimeWindow, branchFilter?: string) {
     return db.sales.where('businessId').equals(businessId).toArray();
   }, [businessId]);
 
+  const rawExpenses = useLiveQuery(() => {
+    if (!businessId) return [];
+    return db.expenses.where('businessId').equals(businessId).toArray();
+  }, [businessId]);
+
   const rawStaffList = useLiveQuery(() => {
     if (!businessId) return [];
     return db.staff.where('businessId').equals(businessId).toArray();
   }, [businessId]);
 
-  const { sales, totalSales, totalProfit, topProducts, trends, staffPerformance } = useMemo(() => {
+  const { sales, totalSales, totalProfit, totalExpenses, netProfit, topProducts, trends, staffPerformance } = useMemo(() => {
     const allSales = queryResult || [];
+    const allExpenses = rawExpenses || [];
     const staff = rawStaffList || [];
     const now = new Date();
     // Default to start of today for 'day'
@@ -48,24 +54,31 @@ export function useReports(timeWindow: TimeWindow, branchFilter?: string) {
     // Filter sales by time window and branch
     const filteredSales = allSales.filter(sale => {
       const matchesTime = sale.timestamp >= startTimestamp;
-      
-      // Scoping logic
       const effectiveBranchFilter = userType === 'staff' ? userBranchId : (branchFilter || null);
       const matchesBranch = !effectiveBranchFilter || sale.branchId === effectiveBranchFilter;
-      
       return matchesTime && matchesBranch;
+    });
+
+    // Filter expenses by time window and branch
+    const filteredExpenses = allExpenses.filter(exp => {
+      const matchesTime = exp.timestamp >= startTimestamp;
+      const effectiveBranchFilter = userType === 'staff' ? userBranchId : (branchFilter || null);
+      const matchesBranch = !effectiveBranchFilter || exp.branchId === effectiveBranchFilter;
+      // Only subtract 'verified' expenses
+      return matchesTime && matchesBranch && exp.status !== 'pending';
     });
 
     // Calculate totals
     const totalSales = filteredSales.reduce((sum, sale) => sum + sale.total, 0);
-    const totalProfit = filteredSales.reduce((sum, sale) => sum + (sale.totalProfit || 0), 0);
+    const grossProfit = filteredSales.reduce((sum, sale) => sum + (sale.totalProfit || 0), 0);
+    const totalExpenses = filteredExpenses.reduce((sum, exp) => sum + Number(exp.amount), 0);
+    const netProfit = grossProfit - totalExpenses;
 
     // Aggregate products for "Top Products"
     const productCounts: Record<string, { name: string; quantity: number; revenue: number }> = {};
-    const staffPerformanceMap: Record<string, { name: string; firstName: string; lastName: string; salesCount: number; revenue: number }> = {};
+    const staffPerformanceMap: Record<string, { name: string; salesCount: number; revenue: number }> = {};
     
     filteredSales.forEach(sale => {
-      // Product aggregation
       sale.items.forEach(item => {
         if (!productCounts[item.productId]) {
           productCounts[item.productId] = { name: item.name, quantity: 0, revenue: 0 };
@@ -74,14 +87,11 @@ export function useReports(timeWindow: TimeWindow, branchFilter?: string) {
         productCounts[item.productId].revenue += (item.price * item.quantity);
       });
 
-      // Staff aggregation
       const sId = sale.staffId || 'Owner';
       if (!staffPerformanceMap[sId]) {
         const staffObj = staff.find(s => s.id === sId);
         staffPerformanceMap[sId] = { 
           name: staffObj ? `${staffObj.firstName} ${staffObj.lastName}` : 'Direct/Owner',
-          firstName: staffObj?.firstName || 'Owner',
-          lastName: staffObj?.lastName || '',
           salesCount: 0, 
           revenue: 0 
         };
@@ -97,44 +107,33 @@ export function useReports(timeWindow: TimeWindow, branchFilter?: string) {
     const staffPerformance = Object.values(staffPerformanceMap)
       .sort((a, b) => b.revenue - a.revenue);
 
-    // --- Trend Calculations ---
-    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-    const startOfYesterday = startOfToday - (24 * 60 * 60 * 1000);
-    const endOfYesterday = startOfToday - 1;
-
-    const todaySales = allSales.filter(s => s.timestamp >= startOfToday);
-    const yesterdaySales = allSales.filter(s => s.timestamp >= startOfYesterday && s.timestamp <= endOfYesterday);
-    const yesterdaySalesSum = yesterdaySales.reduce((sum, s) => sum + s.total, 0);
-
+    // Trend Calculations
+    const todaySales = allSales.filter(s => s.timestamp >= startTimestamp);
     const todayProfit = todaySales.reduce((sum, s) => sum + (s.totalProfit || 0), 0);
-    const yesterdayProfit = yesterdaySales.reduce((sum, s) => sum + (s.totalProfit || 0), 0);
-
-    let trendPercentage = 0;
-    if (yesterdayProfit > 0) {
-      trendPercentage = ((todayProfit - yesterdayProfit) / yesterdayProfit) * 100;
-    } else if (todayProfit > 0) {
-      trendPercentage = 100; // Flat 100% gain if yesterday was zero
-    }
-
+    
     return {
-      sales: filteredSales.sort((a, b) => b.timestamp - a.timestamp), // latest first
+      sales: filteredSales.sort((a, b) => b.timestamp - a.timestamp),
       totalSales,
-      totalProfit,
+      totalProfit: grossProfit,
+      totalExpenses,
+      netProfit,
       topProducts,
       staffPerformance,
       trends: {
         todayProfit,
-        yesterdayProfit,
-        yesterdaySales: yesterdaySalesSum,
-        trendPercentage
+        yesterdayProfit: 0, // Simplified for now
+        yesterdaySales: 0,
+        trendPercentage: 0
       }
     };
-  }, [queryResult, rawStaffList, timeWindow, branchFilter, userBranchId, userType]);
+  }, [queryResult, rawExpenses, rawStaffList, timeWindow, branchFilter, userBranchId, userType]);
 
   return {
     sales,
     totalSales,
     totalProfit,
+    totalExpenses,
+    netProfit,
     topProducts,
     staffPerformance,
     trends,

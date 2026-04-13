@@ -403,25 +403,27 @@ export function Settings() {
 
         {/* M-Pesa Integration - Automated Sales */}
         {userType === 'owner' && (
-          <div className="card" style={{ padding: 'min(24px, 5vw)', border: useMpesa ? '2px solid var(--success)' : '1px solid var(--border)' }}>
+          <div className="card" style={{ padding: 'min(24px, 5vw)', border: '1px solid var(--border)', opacity: 0.8 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
               <h2 style={{ fontSize: '1.5rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '12px', margin: 0 }}>
-                <Smartphone size={24} color={useMpesa ? "var(--success)" : "var(--primary)"} />
+                <Smartphone size={24} color="var(--primary)" />
                 M-Pesa Automation
+                <span style={{ fontSize: '0.65rem', background: 'var(--primary)', color: 'white', padding: '2px 8px', borderRadius: '10px', verticalAlign: 'middle' }}>COMING SOON</span>
               </h2>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-muted)' }}>{useMpesa ? 'ENABLED' : 'DISABLED'}</span>
-                <label className="switch">
-                  <input type="checkbox" checked={useMpesa} onChange={(e) => setUseMpesa(e.target.checked)} />
+                <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-muted)' }}>DISABLED</span>
+                <label className="switch" style={{ opacity: 0.5, pointerEvents: 'none' }}>
+                  <input type="checkbox" checked={false} disabled />
                   <span className="slider round"></span>
                 </label>
               </div>
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', opacity: useMpesa ? 1 : 0.6, pointerEvents: useMpesa ? 'auto' : 'none' }}>
-              <div style={{ background: 'rgba(34, 197, 94, 0.05)', padding: '16px', borderRadius: '12px', border: '1px solid rgba(34, 197, 94, 0.2)', marginBottom: '12px' }}>
-                <p style={{ fontSize: '0.85rem', color: '#166534', fontWeight: 600 }}> 
-                   Automated M-Pesa is ENABLED. Customers will pay via a phone prompt, and funds will be logically routed to your records.
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+              <div style={{ background: 'var(--bg-secondary)', padding: '16px', borderRadius: '12px', border: '1px solid var(--border)', marginBottom: '12px' }}>
+                <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', fontWeight: 600 }}> 
+                   Full STK Push automation is currently being hardened for production. 
+                   Enter your details below to be ready for the launch.
                 </p>
               </div>
 
@@ -451,7 +453,7 @@ export function Settings() {
                 </span>
               </div>
 
-              <button className="btn-primary" onClick={handleSaveMpesaConfig}>Save Payment Settings</button>
+              <button className="btn-primary" onClick={handleSaveMpesaConfig}>Save Preliminary Settings</button>
             </div>
           </div>
         )}

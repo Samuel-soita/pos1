@@ -1,13 +1,29 @@
-import { useState, useEffect, type ReactNode } from 'react';
-import { Lock, X, Sparkles, Wallet, Home, LogOut, ArrowLeft } from 'lucide-react';
-import { usePWAUpdate } from '../hooks/usePWAUpdate';
-import { useSync, useSyncStatus } from '../hooks/useSync';
-import { useSubscription } from '../hooks/useSubscription';
-import { useLiveQuery } from 'dexie-react-hooks';
+import { useState, useEffect, createContext, useContext, type ReactNode } from 'react';
 import { db } from '../db/db';
+import { useLiveQuery } from 'dexie-react-hooks';
+import { useSync } from '../hooks/useSync';
 import { useAuth } from '../hooks/useAuth';
+import { useSubscription } from '../hooks/useSubscription';
 import { useCashControl } from '../hooks/useCashControl';
 import { useShifts } from '../hooks/useShifts';
+import { usePWAUpdate } from '../hooks/usePWAUpdate';
+import { useSyncStatus } from '../hooks/useSync';
+import { 
+  X, LogOut, Lock, 
+  Sparkles, Home, Wallet, ArrowLeft
+} from 'lucide-react';
+
+interface LayoutContextType {
+  requestAuth: (callback: () => void) => void;
+}
+
+const LayoutContext = createContext<LayoutContextType | undefined>(undefined);
+
+export function useLayout() {
+  const context = useContext(LayoutContext);
+  if (!context) throw new Error('useLayout must be used within Layout');
+  return context;
+}
 
 interface LayoutProps {
   children: ReactNode;
@@ -15,7 +31,7 @@ interface LayoutProps {
   setActiveTab: (tab: string) => void;
 }
 
-const RESTRICTED_TABS = ['dashboard', 'inventory', 'reports', 'settings', 'staff'];
+const RESTRICTED_TABS = ['dashboard', 'inventory', 'reports', 'settings', 'staff', 'procurement'];
 
 export function Layout({ children, activeTab, setActiveTab }: LayoutProps) {
   useSync();
@@ -24,6 +40,7 @@ export function Layout({ children, activeTab, setActiveTab }: LayoutProps) {
 
   const [isManagerUnlocked, setIsManagerUnlocked] = useState(false);
   const [showPinModal, setShowPinModal] = useState(false);
+  const [pendingAction, setPendingAction] = useState<(() => void) | null>(null);
   const [showClosingModal, setShowClosingModal] = useState(false);
   const [pinInput, setPinInput] = useState('');
 
@@ -48,20 +65,40 @@ export function Layout({ children, activeTab, setActiveTab }: LayoutProps) {
     const isRestrictedDevice = securityMode === 'staff';
 
     // Suspended users see restricted views, but OWNERS must still reach Settings to PAY the bill.
+    const staffForbidden = isStaff 
+      ? Object.entries(business?.staffPermissions || {})
+          // eslint-disable-next-line @typescript-eslint/no-unused-vars
+          .filter(([_, allowed]) => !allowed)
+          .map(([id]) => id)
+      : [];
+
     const forbiddenTabs = isSuspended 
       ? RESTRICTED_TABS.filter(t => t !== 'settings') 
-      : (isStaff || isRestrictedDevice) ? RESTRICTED_TABS : [];
+      : (isRestrictedDevice ? RESTRICTED_TABS : staffForbidden);
 
     if (!isManagerUnlocked && forbiddenTabs.includes(activeTab)) {
       setActiveTab('sales');
     }
-  }, [userType, securityMode, subStatus, isManagerUnlocked, activeTab, setActiveTab]);
+  }, [userType, securityMode, subStatus, isManagerUnlocked, activeTab, setActiveTab, business?.staffPermissions]);
+
+  const requestAuth = (callback: () => void) => {
+    if (isManagerUnlocked || userType === 'owner') {
+      callback();
+    } else {
+      setPendingAction(() => callback);
+      setShowPinModal(true);
+    }
+  };
 
   const handlePinSubmit = () => {
     if (pinInput === ownerPin) {
       setIsManagerUnlocked(true);
       setShowPinModal(false);
       setPinInput('');
+      if (pendingAction) {
+        pendingAction();
+        setPendingAction(null);
+      }
     } else {
       alert('Incorrect PIN!');
       setPinInput('');
@@ -76,7 +113,8 @@ export function Layout({ children, activeTab, setActiveTab }: LayoutProps) {
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', position: 'relative' }}>
+    <LayoutContext.Provider value={{ requestAuth }}>
+      <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100vh', position: 'relative' }}>
       {/* Vault Blur Layer - Only active during security/locked states */}
       {(showPinModal || subStatus === 'suspended') && (
         <div 
@@ -101,7 +139,7 @@ export function Layout({ children, activeTab, setActiveTab }: LayoutProps) {
               <h2 style={{ fontSize: '1.5rem', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <Lock color="var(--danger)" /> Restricted Area
               </h2>
-              <button onClick={() => { setShowPinModal(false); setPinInput(''); }} style={{ background: 'transparent', padding: 0 }}><X size={24} /></button>
+              <button onClick={() => { setShowPinModal(false); setPinInput(''); setActiveTab('dashboard'); }} style={{ background: 'transparent', padding: 0 }}><X size={24} /></button>
             </div>
             <p style={{ color: 'var(--text-muted)', marginBottom: '24px' }}>Enter the 4-digit Owner PIN to access this feature.</p>
             <div className="input-group">
@@ -278,6 +316,7 @@ export function Layout({ children, activeTab, setActiveTab }: LayoutProps) {
       </main>
 
     </div>
+    </LayoutContext.Provider>
   );
 }
 function UpdateStatus() {

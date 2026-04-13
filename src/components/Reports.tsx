@@ -11,7 +11,7 @@ export function Reports() {
   const { userType, businessId } = useAuth();
   const [timeWindow, setTimeWindow] = useState<TimeWindow>('month');
   const [selectedBranch, setSelectedBranch] = useState('');
-  const { totalSales, totalProfit, topProducts, sales, staffPerformance, trends } = useReports(timeWindow, selectedBranch);
+  const { totalSales, totalExpenses, netProfit, topProducts, sales, staffPerformance, trends } = useReports(timeWindow, selectedBranch);
 
   const branches = useLiveQuery(() => 
     businessId ? db.branches.where('businessId').equals(businessId).toArray() : []
@@ -70,8 +70,12 @@ export function Reports() {
     doc.setFontSize(16);
     doc.setFont('helvetica', 'bold');
     doc.text(`KES ${totalSales.toLocaleString()}`, 18, 62);
-    doc.setTextColor(22, 163, 74); // Green for profit
-    doc.text(`KES ${totalProfit.toLocaleString()}`, 114, 62);
+    doc.setTextColor(239, 68, 68); // Red for expenses
+    doc.text(`(KES ${totalExpenses.toLocaleString()})`, 114, 62);
+    
+    doc.setTextColor(22, 163, 74); // Green for net profit
+    doc.setFontSize(14);
+    doc.text(`Net Profit: KES ${netProfit.toLocaleString()}`, 114, 75);
 
     // Table Data
     doc.setFontSize(14);
@@ -190,15 +194,25 @@ export function Reports() {
           </div>
         </div>
         
+        <div className="card" style={{ display: 'flex', alignItems: 'center', gap: '20px', borderLeft: '4px solid var(--danger)' }}>
+          <div style={{ background: '#fef2f2', padding: '16px', borderRadius: '16px' }}>
+            <DollarSign size={32} color="var(--danger)" />
+          </div>
+          <div>
+            <p style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-muted)' }}>Verified Expenses</p>
+            <h2 style={{ fontSize: '1.75rem', fontWeight: 800 }}>KES {totalExpenses.toLocaleString()}</h2>
+          </div>
+        </div>
+
         <div className="card" style={{ display: 'flex', alignItems: 'center', gap: '20px', borderLeft: '4px solid var(--success)' }}>
           <div style={{ background: '#dcfce7', padding: '16px', borderRadius: '16px' }}>
             <TrendingUp size={32} color="var(--success)" />
           </div>
           <div>
-            <p style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-muted)' }}>Total Profit Margin</p>
-            <h2 style={{ fontSize: '1.75rem', fontWeight: 800 }}>KES {totalProfit.toLocaleString()}</h2>
+            <p style={{ fontSize: '0.875rem', fontWeight: 600, color: 'var(--text-muted)' }}>Net Profit</p>
+            <h2 style={{ fontSize: '1.75rem', fontWeight: 800 }}>KES {netProfit.toLocaleString()}</h2>
             <p style={{ fontSize: '0.8rem', color: 'var(--success)' }}>
-              {totalSales > 0 ? ((totalProfit / totalSales) * 100).toFixed(1) : '0'}% margin
+              {totalSales > 0 ? ((netProfit / totalSales) * 100).toFixed(1) : '0'}% net margin
             </p>
           </div>
         </div>
@@ -258,7 +272,7 @@ export function Reports() {
               {staffPerformance.map((staff, idx) => (
                 <div key={idx} style={{ padding: '16px', background: 'var(--background)', borderRadius: '12px', border: '1px solid var(--border)' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                    <span style={{ fontWeight: 700 }}>{staff.firstName} {staff.lastName}</span>
+                    <span style={{ fontWeight: 700 }}>{staff.name}</span>
                     <span style={{ fontSize: '0.75rem', padding: '2px 8px', background: 'var(--primary)', color: 'white', borderRadius: '12px' }}>#{idx+1}</span>
                   </div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem' }}>

@@ -88,9 +88,10 @@ export function useAuth() {
 
       await db.businesses.put(newBiz);
       
-      // 5. Log the provisioning audit
+      // 5. Log the provisioning audit (Permanent Registry)
       await supabase.from('provisioning_audit').insert([{
         business_id: businessId,
+        business_code: businessCode, // NEW: Explicitly store code in registry
         engineer_id: 'SYSTEM_INSTALLER',
         device_metadata: { 
           userAgent: navigator.userAgent,
@@ -98,9 +99,12 @@ export function useAuth() {
         }
       }]);
 
-      // 6. Sign out immediately so the background sync doesn't trigger 403s
-      // The user must now log in via the AuthScreen to start a real session.
-      await supabase.auth.signOut();
+      // 6. Direct Entry: Setup session pointers immediately
+      setCurrentBusiness(newBiz);
+      setUserType('owner');
+      localStorage.setItem('biz_id', businessId);
+      localStorage.setItem('pinned_biz_code', businessCode);
+      localStorage.setItem('initial_sync_done', 'true'); // First device is fresh
       
       return newBiz;
     } finally {
@@ -111,13 +115,26 @@ export function useAuth() {
   const businessLogin = async (businessCode: string, pin: string, email?: string) => {
     let finalEmail = email;
 
-    // If email isn't provided (email-less login), look it up locally
+    // If email isn't provided (email-less login), look it up locally then cloud resolver
     if (!finalEmail) {
       const biz = await db.businesses.where('code').equals(businessCode).first();
-      if (!biz || !biz.ownerEmail) {
-        throw new Error('Business not found or not provisioned correctly on this device. Please use Admin Provisioning.');
+      if (biz?.ownerEmail) {
+        finalEmail = biz.ownerEmail;
+      } else {
+        // New Device Case: Resolve Email from Cloud using Business Code
+        const { data: cloudEmail, error: resolveErr } = await supabase.rpc('resolve_business_email', {
+          p_code: businessCode
+        });
+        
+        if (resolveErr || !cloudEmail) {
+          throw new Error('Business Code not found. Please verify the code or contact support.');
+        }
+        finalEmail = cloudEmail;
       }
-      finalEmail = biz.ownerEmail;
+    }
+
+    if (!finalEmail) {
+      throw new Error('Could not resolve business email. Please contact support.');
     }
 
     // Perform Supabase Login

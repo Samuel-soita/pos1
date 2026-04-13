@@ -28,20 +28,11 @@ export function Sales() {
   const [showCheckoutModal, setShowCheckoutModal] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
   const [mpesaCode, setMpesaCode] = useState('');
-  const [activeCheckoutId, setActiveCheckoutId] = useState<string | null>(null);
-  const [paymentMethod, setPaymentMethod] = useState<'Cash' | 'Card' | 'M-Pesa'>('Cash');
-  const { printReceipt } = usePrinter();
-  const { status: subStatus, limitReached, message: subMessage } = useSubscription();
   const [lastSale, setLastSale] = useState<Sale | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const { isOnline, pendingCount } = useSyncStatus();
   
-  // M-Pesa Automation State
-  const [mpesaConfig, setMpesaConfig] = useState<{ is_enabled: boolean, convenience_fee: number } | null>(null);
-  const [isAutomatingMpesa, setIsAutomatingMpesa] = useState(false);
-  const [mpesaPhone, setMpesaPhone] = useState(business?.telephone || '');
-  const [pollingStatus, setPollingStatus] = useState<'idle' | 'waiting' | 'verifying' | 'success' | 'failed'>('idle');
-  const [automatedError, setAutomatedError] = useState<string | null>(null);
+  // Sensory States
   
   // Sensory States
   const [glowingProductId, setGlowingProductId] = useState<string | null>(null);
@@ -57,21 +48,9 @@ export function Sales() {
     }
   }, [view]);
 
-  // Load M-Pesa Config if online
-  useEffect(() => {
-    if (businessId) {
-      import('../lib/supabase').then(({ supabase }) => {
-        supabase
-          .from('business_mpesa_configs')
-          .select('is_enabled, convenience_fee')
-          .eq('business_id', businessId)
-          .maybeSingle()
-          .then(({ data }) => {
-            if (data) setMpesaConfig(data);
-          });
-      });
-    }
-  }, [businessId]);
+  const [paymentMethod, setPaymentMethod] = useState<'Cash' | 'Card' | 'M-Pesa'>('Cash');
+  const { printReceipt } = usePrinter();
+  const { status: subStatus, limitReached, message: subMessage } = useSubscription();
 
   // Speed Optimization: Keyboard Shortcuts
   useEffect(() => {
@@ -137,6 +116,27 @@ export function Sales() {
       return;
     }
 
+    // Pre-flight Stock Guard: Double check server stock if online to prevent multi-terminal conflicts
+    if (navigator.onLine) {
+      try {
+        const { supabase } = await import('../lib/supabase');
+        for (const item of cart) {
+          const { data: serverProduct } = await supabase
+            .from('products')
+            .select('quantity')
+            .eq('id', item.id)
+            .single();
+          
+          if (serverProduct && serverProduct.quantity < item.quantity) {
+             alert(`⚠️ Multi-terminal conflict: ${item.name} just went out of stock on another device.`);
+             return;
+          }
+        }
+      } catch (e) {
+        console.warn("Stock guard check failed, proceeding with local truth:", e);
+      }
+    }
+
     const taxAmount = cartTotal - (cartTotal / (1 + (taxRate / 100))); 
     const currentCart = [...cart];
     const finalCode = autoCode || mpesaCode;
@@ -156,8 +156,6 @@ export function Sales() {
       setShowCheckoutModal(false);
       setShowSuccess(true);
       setMpesaCode('');
-      setPollingStatus('idle');
-      setIsAutomatingMpesa(false);
       
       const saleToPrint = {
         id: result.receiptId,
@@ -191,77 +189,10 @@ export function Sales() {
         console.warn("Printer failed, but sale recorded:", e);
       }
     }
-  }, [limitReached, cartTotal, taxRate, cart, mpesaCode, completeSale, subStatus, businessId, setShowCheckoutModal, setShowSuccess, setMpesaCode, setPollingStatus, setIsAutomatingMpesa, business, printReceipt]);
+  }, [limitReached, cartTotal, taxRate, cart, mpesaCode, completeSale, subStatus, businessId, setShowCheckoutModal, setShowSuccess, setMpesaCode, business, printReceipt]);
 
   useHardwareScanner(handleHardwareScan);
 
-  // Polling for Sale Success via M-Pesa
-  useEffect(() => {
-    if (pollingStatus !== 'waiting' && pollingStatus !== 'verifying' || !activeCheckoutId) return;
-
-    const interval = setInterval(async () => {
-       const { supabase: supabaseClient } = await import('../lib/supabase');
-        const { data: payments, error: pollError } = await supabaseClient
-          .from('payment_requests')
-          .select('status, mpesa_code')
-          .eq('checkout_request_id', activeCheckoutId)
-          .eq('status', 'success')
-          .limit(1);
-
-        if (pollError) {
-          console.error("[M-Pesa Poll] Database query failed:", pollError);
-        }
-
-        if (payments && payments.length > 0) {
-          setMpesaCode(payments[0].mpesa_code);
-          setPollingStatus('success');
-          clearInterval(interval);
-          // Execute the final sale recording
-          setTimeout(() => executePayment('M-Pesa', payments[0].mpesa_code), 500);
-        }
-    }, 3000);
-
-    return () => clearInterval(interval);
-  }, [pollingStatus, businessId, activeCheckoutId, executePayment]);
-
-  const initiateStkPush = async () => {
-    if (!businessId || !mpesaPhone) return;
-    setIsAutomatingMpesa(true);
-    setAutomatedError(null);
-    setPollingStatus('waiting');
-
-    try {
-      const { supabase } = await import('../lib/supabase');
-      const { data, error: funcError } = await supabase.functions.invoke('customer-stk-push', {
-        body: {
-          businessId,
-          phone: mpesaPhone,
-          amount: cartTotal,
-          saleId: crypto.randomUUID()
-        }
-      });
-
-      if (funcError) {
-        console.error("[STK Push] Function invocation error:", funcError);
-        throw funcError;
-      }
-      
-      if (data.error) {
-        console.error("[STK Push] Function logic error:", data.error);
-        if (data.stack) console.error("[STK Push] Stack Trace:", data.stack);
-        throw new Error(data.error);
-      }
-
-      if (data.checkoutRequestId) {
-        setActiveCheckoutId(data.checkoutRequestId);
-      }
-
-    } catch (err: unknown) {
-      setAutomatedError(err instanceof Error ? err.message : String(err));
-      setPollingStatus('failed');
-      setIsAutomatingMpesa(false);
-    }
-  };
 
   if (view === 'history') {
     return (
@@ -627,65 +558,27 @@ export function Sales() {
 
               {paymentMethod === 'M-Pesa' && (
                 <div className="fade-in" style={{ background: '#f0fdf4', padding: '24px', borderRadius: '16px', border: '1px solid #dcfce7' }}>
-                   {mpesaConfig?.is_enabled ? (
-                     <div>
-                       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '16px' }}>
-                         <span style={{ fontWeight: 600 }}>Total with Fee</span>
-                         <span style={{ fontWeight: 900, fontSize: '1.25rem' }}>KES {(cartTotal + (mpesaConfig.convenience_fee || 0)).toLocaleString()}</span>
-                       </div>
-                       
-                       <div className="input-with-icon-wrapper" style={{ marginBottom: '16px' }}>
-                          <label style={{ color: '#166534', fontWeight: 700 }}>Customer Mobile Number</label>
-                          <input 
-                            type="text" 
-                            placeholder="2547XXXXXXXX" 
-                            value={mpesaPhone}
-                            onChange={e => setMpesaPhone(e.target.value)}
-                            style={{ borderColor: '#86efac', fontWeight: 800 }}
-                            disabled={isAutomatingMpesa}
-                          />
-                       </div>
-
-                       {automatedError && <p style={{ color: 'var(--danger)', fontSize: '0.8rem', marginBottom: '12px' }}>{automatedError}</p>}
-
-                       {pollingStatus === 'waiting' ? (
-                         <div style={{ textAlign: 'center', padding: '10px' }}>
-                           <p className="animate-pulse" style={{ fontWeight: 800, color: 'var(--success)' }}>Waiting for Customer PIN...</p>
-                         </div>
-                       ) : (
-                        <button 
-                          className="btn-primary" 
-                          style={{ width: '100%', background: 'var(--success)' }}
-                          onClick={initiateStkPush}
-                          disabled={isAutomatingMpesa || !mpesaPhone}
-                        >
-                          Request STK Push
-                        </button>
-                       )}
-                     </div>
-                   ) : (
-                      <div style={{ textAlign: 'center', padding: '10px 0' }}>
-                        <Smartphone size={40} color="var(--text-muted)" style={{ opacity: 0.3, margin: '0 auto 12px' }} />
-                        <p style={{ fontWeight: 700, color: 'var(--text-muted)', marginBottom: '4px' }}>Automation Disabled</p>
-                        <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginBottom: '16px' }}>
-                          Enable "M-Pesa Automation" in Settings to use automated STK Push.
-                        </p>
-                        <div style={{ borderTop: '1px dashed var(--border)', margin: '16px 0' }}></div>
-                        <p style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '8px' }}>Manual Instructions</p>
-                        <p style={{ fontSize: '1rem', fontWeight: 800, color: '#15803d' }}>Pay KES {cartTotal.toFixed(2)} to 0768640343</p>
-                        <div className="input-group" style={{ marginTop: '16px', marginBottom: 0 }}>
-                          <label style={{ color: '#166534', fontWeight: 700 }}>M-Pesa Transaction Code</label>
-                          <input 
-                            required
-                            type="text" 
-                            placeholder="e.g. QRC7W8X9Y" 
-                            value={mpesaCode}
-                            onChange={e => setMpesaCode(e.target.value.toUpperCase())}
-                            style={{ borderColor: '#86efac', fontWeight: 800, letterSpacing: '1px' }}
-                          />
-                        </div>
+                    <div style={{ textAlign: 'center', padding: '10px 0' }}>
+                      <Smartphone size={40} color="var(--primary)" style={{ opacity: 0.5, margin: '0 auto 12px' }} />
+                      <p style={{ fontWeight: 800, color: 'var(--primary)', marginBottom: '8px' }}>M-Pesa Express (Coming Soon)</p>
+                      
+                      <div style={{ borderTop: '1px dashed var(--border)', margin: '16px 0' }}></div>
+                      
+                      <p style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '8px' }}>Manual Payment</p>
+                      <p style={{ fontSize: '1.1rem', fontWeight: 900, color: '#15803d', marginBottom: '16px' }}>Pay KES {cartTotal.toFixed(2)} to 0768640343</p>
+                      
+                      <div className="input-group" style={{ textAlign: 'left', marginBottom: 0 }}>
+                        <label style={{ color: '#166534', fontWeight: 700 }}>M-Pesa Transaction Code</label>
+                        <input 
+                          required
+                          type="text" 
+                          placeholder="e.g. QRC7W8X9Y" 
+                          value={mpesaCode}
+                          onChange={e => setMpesaCode(e.target.value.toUpperCase())}
+                          style={{ borderColor: '#86efac', fontWeight: 800, letterSpacing: '1px' }}
+                        />
                       </div>
-                   )}
+                    </div>
                 </div>
               )}
 
@@ -695,15 +588,11 @@ export function Sales() {
                   width: '100%', 
                   height: '64px', 
                   fontSize: '1.25rem', 
-                  marginTop: '12px', 
-                  background: paymentMethod === 'M-Pesa' ? 'var(--success)' : 'var(--primary)',
-                  opacity: (paymentMethod === 'M-Pesa' && !mpesaCode.trim() && !isAutomatingMpesa) ? 0.6 : 1,
-                  cursor: (paymentMethod === 'M-Pesa' && !mpesaCode.trim() && !isAutomatingMpesa) ? 'not-allowed' : 'pointer'
+                  marginTop: '12px'
                 }}
-                disabled={(paymentMethod === 'M-Pesa' && !mpesaCode.trim() && !isAutomatingMpesa) || isAutomatingMpesa}
                 onClick={() => executePayment(paymentMethod)}
               >
-                {isAutomatingMpesa ? 'Automating...' : `Confirm KES ${cartTotal.toFixed(2)} Paid`}
+                {`Confirm KES ${cartTotal.toFixed(2)} Paid`}
               </button>
             </div>
           </div>

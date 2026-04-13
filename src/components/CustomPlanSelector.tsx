@@ -5,9 +5,8 @@ import { useAuth } from '../hooks/useAuth';
 import { 
   Check, Sparkles, Building2, 
   ChevronRight, Calculator,
-  Package, GitMerge, Clock, BarChart3, Download, Printer
+  Package, GitMerge, Clock, BarChart3, Download, Printer, Smartphone
 } from 'lucide-react';
-import { MpesaPaymentFlow } from './MpesaPaymentFlow';
 
 const FEATURE_ICONS: Record<string, React.ReactNode> = {
   inventory_alerts: <Package size={20} />,
@@ -235,16 +234,50 @@ export function CustomPlanSelector({ onComplete }: { onComplete?: () => void }) 
 
           {showPayment && (
             <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '20px' }}>
-              <div style={{ maxWidth: '400px', width: '100%' }}>
-                <MpesaPaymentFlow 
-                  amount={totalMonthly} 
-                  onSuccess={() => {
-                    setShowPayment(false);
-                    if (onComplete) onComplete();
-                    else window.location.reload();
-                  }}
-                  onCancel={() => setShowPayment(false)}
-                />
+              <div style={{ maxWidth: '400px', width: '100%', background: 'white', borderRadius: '24px', padding: '32px' }}>
+                <div style={{ textAlign: 'center', marginBottom: '24px' }}>
+                   <div style={{ width: '48px', height: '48px', background: 'rgba(34, 197, 94, 0.15)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px' }}>
+                      <Smartphone size={24} color="#22c55e" />
+                   </div>
+                   <h3 style={{ fontWeight: 900, fontSize: '1.25rem' }}>Manual Activation</h3>
+                   <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Automated STK Push (Coming Soon)</p>
+                </div>
+
+                <div style={{ background: 'var(--bg-secondary)', padding: '20px', borderRadius: '16px', marginBottom: '24px' }}>
+                   <p style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: '8px' }}>Payment Instructions</p>
+                   <p style={{ fontWeight: 900, fontSize: '1.2rem', color: '#166534' }}>Pay KES {totalMonthly.toLocaleString()} to 0768640343</p>
+                   <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Recipient: SAMUEL SOITA</p>
+                </div>
+
+                <div className="input-group">
+                   <label style={{ fontWeight: 700 }}>M-Pesa Transaction Code</label>
+                   <input 
+                     type="text" 
+                     placeholder="e.g. QRC7W8X9Y" 
+                     style={{ height: '48px', fontSize: '1rem', fontWeight: 800, letterSpacing: '1px' }}
+                     onChange={() => {
+                       // Manual verification logic
+                     }}
+                   />
+                </div>
+
+                <div style={{ display: 'flex', gap: '12px', marginTop: '24px' }}>
+                   <button 
+                     className="btn-primary" 
+                     style={{ flex: 1 }}
+                     onClick={async () => {
+                       // Optimized: Just set to pending_verification for now
+                       await db.businesses.update(business!.id, { status: 'pending_verification' });
+                       setShowPayment(false);
+                       alert('Payment code submitted. Your account will be activated shortly.');
+                       if (onComplete) onComplete();
+                       else window.location.reload();
+                     }}
+                   >
+                     Submit Code
+                   </button>
+                   <button className="btn-secondary" onClick={() => setShowPayment(false)}>Cancel</button>
+                </div>
               </div>
             </div>
           )}

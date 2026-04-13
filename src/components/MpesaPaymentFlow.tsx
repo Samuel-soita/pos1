@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react';
-import { supabase } from '../lib/supabase';
 import { db } from '../db/db';
 import { useAuth } from '../hooks/useAuth';
 import { Smartphone, Loader2, CheckCircle2, AlertCircle, RefreshCcw } from 'lucide-react';
@@ -51,6 +50,7 @@ export function MpesaPaymentFlow({ amount, onSuccess, onCancel }: MpesaPaymentFl
     };
   }, [pollingStatus, business?.id, onSuccess]);
 
+  /*
   const handleInitiatePayment = async () => {
     if (!business || !phoneNumber) return;
     
@@ -82,6 +82,7 @@ export function MpesaPaymentFlow({ amount, onSuccess, onCancel }: MpesaPaymentFl
       setIsProcessing(false);
     }
   };
+  */
 
   if (pollingStatus === 'success') {
     return (
@@ -137,11 +138,10 @@ export function MpesaPaymentFlow({ amount, onSuccess, onCancel }: MpesaPaymentFl
           <div style={{ display: 'flex', gap: '12px' }}>
             <button 
               className="btn-primary" 
-              onClick={handleInitiatePayment}
-              disabled={isProcessing || !phoneNumber}
-              style={{ flex: 1 }}
+              style={{ flex: 1, opacity: 0.6 }}
+              disabled
             >
-              {isProcessing ? 'Waiting for PIN...' : `Pay KES ${totalWithFee.toLocaleString()}`}
+              Pay KES {totalWithFee.toLocaleString()} (Coming Soon)
             </button>
             <button 
               className="btn-secondary" 

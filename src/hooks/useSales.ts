@@ -35,11 +35,23 @@ export function useSales() {
     return await query.reverse().toArray();
   }, [businessId, branchId, userType]) || [];
 
-  const addToCart = (product: Product) => {
+  const addToCart = async (product: Product) => {
     if (!product.id) return;
+    
+    // Hard Stock Lockdown
+    const latestProduct = await db.products.get(product.id);
+    if (!latestProduct || latestProduct.quantity <= 0) {
+      alert(`Product ${product.name} is out of stock!`);
+      return;
+    }
+
     setCart(prev => {
       const existing = prev.find(item => item.id === product.id);
       if (existing) {
+        if (existing.quantity >= latestProduct.quantity) {
+          alert(`Only ${latestProduct.quantity} units remaining in stock.`);
+          return prev;
+        }
         return prev.map(item =>
           item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item
         );
@@ -48,7 +60,7 @@ export function useSales() {
         id: product.id!, 
         name: product.name, 
         price: product.price, 
-        costPrice: product.costPrice ?? (product.price * 0.7), // Fallback if no cost set
+        costPrice: product.costPrice ?? (product.price * 0.7),
         quantity: 1 
       }];
     });
@@ -58,8 +70,16 @@ export function useSales() {
     setCart(prev => prev.filter(item => item.id !== id));
   };
 
-  const updateCartQuantity = (id: string, quantity: number) => {
+  const updateCartQuantity = async (id: string, quantity: number) => {
     if (quantity <= 0) return removeFromCart(id);
+    
+    // Hard Stock Lockdown
+    const product = await db.products.get(id);
+    if (product && quantity > product.quantity) {
+      alert(`Only ${product.quantity} units available.`);
+      return;
+    }
+
     setCart(prev =>
       prev.map(item => (item.id === id ? { ...item, quantity } : item))
     );
