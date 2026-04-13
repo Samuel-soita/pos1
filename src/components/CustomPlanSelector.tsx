@@ -7,6 +7,7 @@ import {
   ChevronRight, Calculator,
   Package, GitMerge, Clock, BarChart3, Download, Printer
 } from 'lucide-react';
+import { MpesaPaymentFlow } from './MpesaPaymentFlow';
 
 const FEATURE_ICONS: Record<string, React.ReactNode> = {
   inventory_alerts: <Package size={20} />,
@@ -29,12 +30,13 @@ export function CustomPlanSelector({ onComplete }: { onComplete?: () => void }) 
     enabledFeatures 
   } = useSubscription();
 
+  const [showPayment, setShowPayment] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+
   const currentPackageId = business?.packageId || 'custom';
-  const basePrice = (packages as any)[currentPackageId]?.price || 0;
+  const basePrice = (packages as Record<string, { price: number }>)[currentPackageId]?.price || 0;
 
   const handleBaseSelect = async (id: string) => {
-    // If selecting a fixed plan, we might want to auto-enable its core features
-    // For now, let's just update the base plan
     await updatePlan(id);
   };
 
@@ -50,18 +52,14 @@ export function CustomPlanSelector({ onComplete }: { onComplete?: () => void }) 
           trialUsed: true
         });
         alert('Plan confirmed and 5-day trial activated!');
+        if (onComplete) onComplete();
+        else window.location.reload();
       } else {
-        alert('Plan confirmed and saved!');
+        setShowPayment(true);
       }
-
-      if (onComplete) {
-        onComplete();
-      } else {
-        window.location.reload();
-      }
-    } catch (err) {
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to save plan');
       console.error(err);
-      alert('Failed to save plan');
     }
   };
 
@@ -76,7 +74,7 @@ export function CustomPlanSelector({ onComplete }: { onComplete?: () => void }) 
             1. Select Your Base Foundation
           </h3>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '16px' }}>
-            {Object.entries(packages).map(([id, pkg]: [string, any]) => (
+            {Object.entries(packages).map(([id, pkg]) => (
               <div 
                 key={id}
                 onClick={() => handleBaseSelect(id)}
@@ -192,7 +190,7 @@ export function CustomPlanSelector({ onComplete }: { onComplete?: () => void }) 
               <div style={{ borderTop: '1px solid var(--border)', paddingTop: '16px' }}>
                 <p style={{ fontSize: '0.7rem', fontWeight: 800, color: 'var(--primary)', textTransform: 'uppercase', marginBottom: '12px' }}>Custom Add-ons</p>
                 {enabledFeatures.map(id => {
-                  const feat = (MODULAR_FEATURES as any)[id];
+                  const feat = (MODULAR_FEATURES as Record<string, { name: string, price: number }>)[id];
                   return (
                     <div key={id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: '8px' }}>
                       <span style={{ fontWeight: 600 }}>{feat?.name}</span>
@@ -211,25 +209,45 @@ export function CustomPlanSelector({ onComplete }: { onComplete?: () => void }) 
             </div>
           </div>
 
-          <button 
-            onClick={handleConfirm}
-            style={{
-              width: '100%',
-              background: 'var(--primary)',
-              color: 'white',
-              padding: '16px',
-              borderRadius: '12px',
-              fontSize: '1.1rem',
-              fontWeight: 800,
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: '10px',
-              boxShadow: '0 10px 15px -3px rgba(37, 99, 235, 0.2)'
-            }}
-          >
-            Confirm & Activate <ChevronRight size={20} />
-          </button>
+          {error && <p style={{ color: 'var(--danger)', fontSize: '0.85rem', marginBottom: '16px' }}>{error}</p>}
+
+          {!showPayment && (
+            <button 
+              onClick={handleConfirm}
+              style={{
+                width: '100%',
+                background: 'var(--primary)',
+                color: 'white',
+                padding: '16px',
+                borderRadius: '12px',
+                fontSize: '1.1rem',
+                fontWeight: 800,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '10px',
+                boxShadow: '0 10px 15px -3px rgba(37, 99, 235, 0.2)'
+              }}
+            >
+              Confirm & Activate <ChevronRight size={20} />
+            </button>
+          )}
+
+          {showPayment && (
+            <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '20px' }}>
+              <div style={{ maxWidth: '400px', width: '100%' }}>
+                <MpesaPaymentFlow 
+                  amount={totalMonthly} 
+                  onSuccess={() => {
+                    setShowPayment(false);
+                    if (onComplete) onComplete();
+                    else window.location.reload();
+                  }}
+                  onCancel={() => setShowPayment(false)}
+                />
+              </div>
+            </div>
+          )}
 
           <p style={{ textAlign: 'center', fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '20px', fontWeight: 500 }}>
             Change your customization at any time. Changes reflect on your next billing cycle.

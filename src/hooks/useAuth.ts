@@ -98,8 +98,6 @@ export function useAuth() {
         }
       }]);
 
-      console.log(`Successfully provisioned business: ${businessCode}`);
-      
       // 6. Sign out immediately so the background sync doesn't trigger 403s
       // The user must now log in via the AuthScreen to start a real session.
       await supabase.auth.signOut();
@@ -133,22 +131,27 @@ export function useAuth() {
     const biz = await db.businesses.get(authData.user.id);
     if (!biz) {
        // If local record is missing but cloud exists, sync it down
-       const { data: remoteBiz } = await supabase.from('businesses').select('*').eq('id', authData.user.id).single();
+       const { data: remoteBiz } = await supabase
+         .from('businesses')
+         .select('id, name, code, pin, package_id, expiry_date, status, trial_used, suspended_revenue_count, staff_count')
+         .eq('id', authData.user.id)
+         .maybeSingle();
+
        if (remoteBiz) {
           const newBiz = {
             id: remoteBiz.id,
-            name: remoteBiz.name,
-            code: remoteBiz.code,
-            pin: remoteBiz.pin,
-            packageId: remoteBiz.package_id,
-            expiryDate: remoteBiz.expiry_date,
-            status: remoteBiz.status,
+            name: remoteBiz.name || '',
+            code: remoteBiz.code || '',
+            pin: remoteBiz.pin || '',
+            packageId: remoteBiz.package_id || 'hustler',
+            expiryDate: Number(remoteBiz.expiry_date) || Date.now(),
+            status: (remoteBiz.status as Business['status']) || 'active',
             trialUsed: remoteBiz.trial_used || false,
             suspendedRevenueCount: remoteBiz.suspended_revenue_count || 0,
             staffCount: remoteBiz.staff_count || 0
           };
           await db.businesses.put(newBiz);
-         setCurrentBusiness(newBiz);
+          setCurrentBusiness(newBiz);
        }
     } else {
       setCurrentBusiness(biz);

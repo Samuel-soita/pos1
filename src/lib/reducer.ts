@@ -26,6 +26,12 @@ export class POSReducer {
         newState.total_revenue = (newState.total_revenue || 0) + event.payload.total;
         newState.sale_count = (newState.sale_count || 0) + 1;
         break;
+
+      case 'EXPENSE_CREATED':
+        // Payload: { id, amount, ... }
+        newState.total_expenses = (newState.total_expenses || 0) + (event.payload.amount || 0);
+        newState.expense_count = (newState.expense_count || 0) + 1;
+        break;
       
       case 'stock_rejected': {
         // Reversal of an optimistic projection

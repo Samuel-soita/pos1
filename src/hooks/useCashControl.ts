@@ -68,16 +68,18 @@ export function useCashControl() {
       syncStatus: 'pending'
     };
 
-    await db.transaction('rw', db.cash_logs, db.sync_queue, db.counters, db.settings, async () => {
+    await db.transaction('rw', db.cash_logs, db.pos_events, db.counters, db.settings, async () => {
       await db.cash_logs.add(newLog);
-      await db.sync_queue.add({
-        id: await generateTraceableId('ORD', businessId, business.code, deviceId),
-        action: 'INSERT',
-        table: 'cash_logs',
+      await db.pos_events.add({
+        event_id: await generateTraceableId('ORD', businessId, business.code, deviceId),
+        business_id: businessId,
+        staff_id: staff?.id || 'owner',
+        event_type: 'CASH_REGISTER_OPENED',
         payload: newLog,
-        timestamp: Date.now(),
-        status: 'pending',
-        errorCount: 0
+        client_timestamp: Date.now(),
+        server_timestamp: 0,
+        hash: 'MOCK_HASH',
+        sync_status: 'pending'
       });
     });
   };
@@ -96,16 +98,18 @@ export function useCashControl() {
       status: 'closed' as const
     };
 
-    await db.transaction('rw', db.cash_logs, db.sync_queue, db.counters, db.settings, async () => {
+    await db.transaction('rw', db.cash_logs, db.pos_events, db.counters, db.settings, async () => {
       await db.cash_logs.update(currentLog.id, update);
-      await db.sync_queue.add({
-        id: await generateTraceableId('ORD', businessId!, business.code, deviceId),
-        action: 'UPDATE',
-        table: 'cash_logs',
+      await db.pos_events.add({
+        event_id: await generateTraceableId('ORD', businessId!, business.code, deviceId),
+        business_id: businessId!,
+        staff_id: currentLog.staffId,
+        event_type: 'CASH_REGISTER_CLOSED',
         payload: { ...currentLog, ...update },
-        timestamp: Date.now(),
-        status: 'pending',
-        errorCount: 0
+        client_timestamp: Date.now(),
+        server_timestamp: 0,
+        hash: 'MOCK_HASH',
+        sync_status: 'pending'
       });
     });
   };

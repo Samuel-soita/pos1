@@ -42,8 +42,17 @@ export function Layout({ children, activeTab, setActiveTab }: LayoutProps) {
 
   // Force cashiers or restricted devices out of restricted tabs on boot
   useEffect(() => {
-    const isRestricted = userType === 'staff' || securityMode === 'staff' || subStatus === 'suspended';
-    if (isRestricted && !isManagerUnlocked && RESTRICTED_TABS.includes(activeTab)) {
+    // Security Lockdown Logic
+    const isSuspended = subStatus === 'suspended';
+    const isStaff = userType === 'staff';
+    const isRestrictedDevice = securityMode === 'staff';
+
+    // Suspended users see restricted views, but OWNERS must still reach Settings to PAY the bill.
+    const forbiddenTabs = isSuspended 
+      ? RESTRICTED_TABS.filter(t => t !== 'settings') 
+      : (isStaff || isRestrictedDevice) ? RESTRICTED_TABS : [];
+
+    if (!isManagerUnlocked && forbiddenTabs.includes(activeTab)) {
       setActiveTab('sales');
     }
   }, [userType, securityMode, subStatus, isManagerUnlocked, activeTab, setActiveTab]);
@@ -76,7 +85,10 @@ export function Layout({ children, activeTab, setActiveTab }: LayoutProps) {
             position: 'fixed', 
             inset: 0, 
             zIndex: 9000,
-            pointerEvents: 'none'
+            pointerEvents: 'auto',
+            backdropFilter: 'blur(8px)',
+            background: 'rgba(255, 255, 255, 0.01)',
+            cursor: 'not-allowed'
           }} 
         />
       )}

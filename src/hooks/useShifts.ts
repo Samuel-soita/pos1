@@ -36,16 +36,17 @@ export function useShifts() {
     };
 
     await db.shifts.add(newShift);
-    
     // Sync
-    await db.sync_queue.add({
-      id: uuidv4(),
-      action: 'INSERT',
-      table: 'shifts',
+    await db.pos_events.add({
+      event_id: uuidv4(),
+      business_id: businessId,
+      staff_id: staffId,
+      event_type: 'SHIFT_STARTED',
       payload: newShift,
-      timestamp: Date.now(),
-      status: 'pending',
-      errorCount: 0
+      client_timestamp: Date.now(),
+      server_timestamp: 0,
+      hash: 'MOCK_HASH',
+      sync_status: 'pending'
     });
 
     return newShift.id;
@@ -63,14 +64,16 @@ export function useShifts() {
     await db.shifts.put(updatedShift);
 
     // Sync
-    await db.sync_queue.add({
-      id: uuidv4(),
-      action: 'UPDATE',
-      table: 'shifts',
+    await db.pos_events.add({
+      event_id: uuidv4(),
+      business_id: activeShift.businessId,
+      staff_id: activeShift.staffId,
+      event_type: 'SHIFT_ENDED',
       payload: updatedShift,
-      timestamp: Date.now(),
-      status: 'pending',
-      errorCount: 0
+      client_timestamp: Date.now(),
+      server_timestamp: 0,
+      hash: 'MOCK_HASH',
+      sync_status: 'pending'
     });
   };
 
@@ -85,16 +88,17 @@ export function useShifts() {
     };
 
     await db.shifts.put(updatedShift);
-    
     // Sync update
-    await db.sync_queue.add({
-      id: uuidv4(),
-      action: 'UPDATE',
-      table: 'shifts',
+    await db.pos_events.add({
+      event_id: uuidv4(),
+      business_id: activeShift.businessId,
+      staff_id: activeShift.staffId,
+      event_type: 'SHIFT_UPDATED',
       payload: updatedShift,
-      timestamp: Date.now(),
-      status: 'pending',
-      errorCount: 0
+      client_timestamp: Date.now(),
+      server_timestamp: 0,
+      hash: 'MOCK_HASH',
+      sync_status: 'pending'
     });
   };
 

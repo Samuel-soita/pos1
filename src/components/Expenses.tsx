@@ -30,7 +30,7 @@ export function Expenses({ initialView }: { initialView?: string }) {
 
   const handleVerify = useCallback(async (id: string, status: 'verified' | 'rejected') => {
     const now = Date.now();
-    await db.transaction('rw', db.expenses, db.sync_queue, db.counters, db.settings, async () => {
+    await db.transaction('rw', db.expenses, db.pos_events, db.counters, db.settings, async () => {
       await db.expenses.update(id, { 
         status, 
         verifiedAt: now,
@@ -38,14 +38,16 @@ export function Expenses({ initialView }: { initialView?: string }) {
       });
       const updated = await db.expenses.get(id);
       const deviceId = await getDeviceId();
-      await db.sync_queue.add({
-        id: await generateTraceableId('EXP', businessId!, business!.code, deviceId),
-        action: 'UPDATE',
-        table: 'expenses',
+      await db.pos_events.add({
+        event_id: await generateTraceableId('EXP', businessId!, business!.code, deviceId),
+        business_id: businessId!,
+        staff_id: 'owner',
+        event_type: 'EXPENSE_UPDATED',
         payload: updated,
-        timestamp: now,
-        status: 'pending',
-        errorCount: 0
+        client_timestamp: now,
+        server_timestamp: 0,
+        hash: 'MOCK_HASH',
+        sync_status: 'pending'
       });
     });
   }, [businessId, business]);
@@ -54,16 +56,18 @@ export function Expenses({ initialView }: { initialView?: string }) {
     if (confirm('Are you sure you want to delete this expense?')) {
       const now = Date.now();
       const deviceId = await getDeviceId();
-      await db.transaction('rw', db.expenses, db.sync_queue, db.counters, db.settings, async () => {
+      await db.transaction('rw', db.expenses, db.pos_events, db.counters, db.settings, async () => {
           await db.expenses.delete(id);
-          await db.sync_queue.add({
-            id: await generateTraceableId('EXP', businessId!, business!.code, deviceId),
-            action: 'DELETE',
-            table: 'expenses',
+          await db.pos_events.add({
+            event_id: await generateTraceableId('EXP', businessId!, business!.code, deviceId),
+            business_id: businessId!,
+            staff_id: 'owner',
+            event_type: 'EXPENSE_DELETED',
             payload: { id },
-            timestamp: now,
-            status: 'pending',
-            errorCount: 0
+            client_timestamp: now,
+            server_timestamp: 0,
+            hash: 'MOCK_HASH',
+            sync_status: 'pending'
           });
         });
     }
@@ -220,7 +224,7 @@ function AddExpenseModal({ onClose, businessId }: { onClose: () => void, busines
     const now = Date.now();
     const deviceId = await getDeviceId();
 
-    await db.transaction('rw', db.expenses, db.sync_queue, db.counters, db.settings, async () => {
+    await db.transaction('rw', db.expenses, db.pos_events, db.counters, db.settings, async () => {
       const id = await generateTraceableId('EXP', businessId, business!.code, deviceId);
       const newExpense = {
         id,
@@ -236,14 +240,16 @@ function AddExpenseModal({ onClose, businessId }: { onClose: () => void, busines
       };
 
       await db.expenses.add(newExpense);
-      await db.sync_queue.add({
-        id: await generateTraceableId('EXP', businessId, business!.code, deviceId),
-        action: 'INSERT',
-        table: 'expenses',
+      await db.pos_events.add({
+        event_id: await generateTraceableId('EXP', businessId, business!.code, deviceId),
+        business_id: businessId,
+        staff_id: userType || 'unknown',
+        event_type: 'EXPENSE_CREATED',
         payload: newExpense,
-        timestamp: now,
-        status: 'pending',
-        errorCount: 0
+        client_timestamp: now,
+        server_timestamp: 0,
+        hash: 'MOCK_HASH',
+        sync_status: 'pending'
       });
     });
 
@@ -318,7 +324,7 @@ function QuickLog({ businessId }: { businessId: string }) {
     const now = Date.now();
     const deviceId = await getDeviceId();
     
-    await db.transaction('rw', db.expenses, db.sync_queue, db.counters, db.settings, async () => {
+    await db.transaction('rw', db.expenses, db.pos_events, db.counters, db.settings, async () => {
       const id = await generateTraceableId('EXP', businessId, business!.code, deviceId);
       const newExpense = {
         id,
@@ -334,14 +340,16 @@ function QuickLog({ businessId }: { businessId: string }) {
       };
 
       await db.expenses.add(newExpense);
-      await db.sync_queue.add({
-        id: await generateTraceableId('EXP', businessId, business!.code, deviceId),
-        action: 'INSERT',
-        table: 'expenses',
+      await db.pos_events.add({
+        event_id: await generateTraceableId('EXP', businessId, business!.code, deviceId),
+        business_id: businessId,
+        staff_id: userType || 'unknown',
+        event_type: 'EXPENSE_CREATED',
         payload: newExpense,
-        timestamp: now,
-        status: 'pending',
-        errorCount: 0
+        client_timestamp: now,
+        server_timestamp: 0,
+        hash: 'MOCK_HASH',
+        sync_status: 'pending'
       });
     });
 
@@ -438,14 +446,16 @@ function RecurringExpensesModal({ onClose, businessId }: { onClose: () => void, 
     };
 
     await db.recurring_expenses.add(newRec);
-    await db.sync_queue.add({
-      id: await generateTraceableId('EXP', businessId, business!.code, deviceId),
-      action: 'INSERT',
-      table: 'recurring_expenses',
+    await db.pos_events.add({
+      event_id: await generateTraceableId('EXP', businessId, business!.code, deviceId),
+      business_id: businessId,
+      staff_id: 'owner',
+      event_type: 'RECURRING_EXPENSE_CREATED',
       payload: newRec,
-      timestamp: now,
-      status: 'pending',
-      errorCount: 0
+      client_timestamp: now,
+      server_timestamp: 0,
+      hash: 'MOCK_HASH',
+      sync_status: 'pending'
     });
 
     setShowForm(false);
@@ -459,14 +469,16 @@ function RecurringExpensesModal({ onClose, businessId }: { onClose: () => void, 
     const deviceId = await getDeviceId();
 
     await db.recurring_expenses.update(item.id, { isActive: newStatus });
-    await db.sync_queue.add({
-      id: await generateTraceableId('EXP', businessId, business!.code, deviceId),
-      action: 'UPDATE',
-      table: 'recurring_expenses',
+    await db.pos_events.add({
+      event_id: await generateTraceableId('EXP', businessId, business!.code, deviceId),
+      business_id: businessId,
+      staff_id: 'owner',
+      event_type: 'RECURRING_EXPENSE_UPDATED',
       payload: { ...item, isActive: newStatus },
-      timestamp: now,
-      status: 'pending',
-      errorCount: 0
+      client_timestamp: now,
+      server_timestamp: 0,
+      hash: 'MOCK_HASH',
+      sync_status: 'pending'
     });
   }, [businessId, business]);
 

@@ -5,10 +5,15 @@
 -- 1. Hardening Existing Tables
 ALTER TABLE businesses ADD COLUMN IF NOT EXISTS code TEXT;
 ALTER TABLE businesses ADD COLUMN IF NOT EXISTS pin TEXT;
-ALTER TABLE businesses ADD COLUMN IF NOT EXISTS package_id TEXT;
+ALTER TABLE businesses ADD COLUMN IF NOT EXISTS package_id TEXT DEFAULT 'hustler';
 ALTER TABLE businesses ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'active';
-ALTER TABLE businesses ADD COLUMN IF NOT EXISTS expiry_date BIGINT;
+ALTER TABLE businesses ALTER COLUMN expiry_date TYPE BIGINT;
 ALTER TABLE businesses ADD COLUMN IF NOT EXISTS business_type TEXT DEFAULT 'sole_proprietor';
+ALTER TABLE businesses ADD COLUMN IF NOT EXISTS staff_count INT DEFAULT 5;
+ALTER TABLE businesses ADD COLUMN IF NOT EXISTS custom_feature_count INT DEFAULT 0;
+ALTER TABLE businesses ADD COLUMN IF NOT EXISTS enabled_features TEXT[];
+ALTER TABLE businesses ADD COLUMN IF NOT EXISTS trial_used BOOLEAN DEFAULT false;
+ALTER TABLE businesses ADD COLUMN IF NOT EXISTS suspended_revenue_count INT DEFAULT 0;
 
 
 -- 2. Products Extra Columns
@@ -29,13 +34,13 @@ END $$;
 
 -- 3. Create Event-Sourced Core
 CREATE TABLE IF NOT EXISTS pos_events (
-    event_id UUID PRIMARY KEY,
+    event_id TEXT PRIMARY KEY,
     business_id UUID REFERENCES businesses(id) ON DELETE CASCADE,
     staff_id TEXT,
     event_type TEXT NOT NULL,      -- 'sale_created', 'stock_reserved', 'stock_committed'
     payload JSONB NOT NULL,
     client_timestamp BIGINT NOT NULL,
-    server_timestamp BIGINT DEFAULT extract(epoch from now()) * 1000,
+    server_timestamp BIGINT DEFAULT (extract(epoch from now()) * 1000)::bigint,
     hash TEXT NOT NULL,
     created_at TIMESTAMPTZ DEFAULT now()
 );
@@ -92,13 +97,37 @@ CREATE TABLE IF NOT EXISTS recurring_expenses (
     is_active BOOLEAN DEFAULT true
 );
 
+-- 4. Payment Integrations & Fees (Universal Hub Mode)
+CREATE TABLE IF NOT EXISTS business_mpesa_configs (
+    business_id UUID PRIMARY KEY REFERENCES businesses(id) ON DELETE CASCADE,
+    payout_destination TEXT,         -- Merchant's Payout Phone/Till/Paybill
+    convenience_fee DECIMAL DEFAULT 0, -- Fee added to customer total
+    is_enabled BOOLEAN DEFAULT false,
+    updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Upgraded payment_requests for Sales support
 CREATE TABLE IF NOT EXISTS payment_requests (
     id TEXT PRIMARY KEY,
     business_id UUID REFERENCES businesses(id) ON DELETE CASCADE,
-    mpesa_code TEXT NOT NULL,
-    payment_type TEXT NOT NULL,
+    sale_id UUID,                   -- Optional: Link to a specific sale
+    checkout_request_id TEXT UNIQUE, -- M-Pesa reference
+    phone_number TEXT,
+    amount DECIMAL DEFAULT 0,
+    mpesa_fee DECIMAL DEFAULT 0,    -- Tracking the convenience fee
+    mpesa_code TEXT,                -- Filled after success
+    payment_type TEXT NOT NULL,     -- 'activation', 'renewal', 'sale'
     timestamp BIGINT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'pending'
+    status TEXT NOT NULL DEFAULT 'pending', -- 'pending', 'success', 'failed'
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Audit log for raw M-Pesa data
+CREATE TABLE IF NOT EXISTS mpesa_raw_callbacks (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    checkout_request_id TEXT,
+    payload JSONB,
+    created_at TIMESTAMPTZ DEFAULT now()
 );
 
 -- Index for unique business codes
@@ -204,11 +233,25 @@ ALTER TABLE pos_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE sales ENABLE ROW LEVEL SECURITY;
 ALTER TABLE expenses ENABLE ROW LEVEL SECURITY;
 ALTER TABLE products ENABLE ROW LEVEL SECURITY;
+ALTER TABLE business_mpesa_configs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE payment_requests ENABLE ROW LEVEL SECURITY;
 
--- Multi-Tenant Isolation
-CREATE POLICY "Strict Tenant Isolation (Businesses)" ON businesses FOR ALL USING (id::text = auth.uid()::text); 
-CREATE POLICY "Strict Tenant Isolation (pos_events)" ON pos_events FOR ALL USING (business_id IN (SELECT id FROM businesses WHERE id::text = auth.uid()::text));
-CREATE POLICY "Strict Tenant Isolation (Sales)" ON sales FOR ALL USING (business_id IN (SELECT id FROM businesses WHERE id::text = auth.uid()::text));
+-- Multi-Tenant Isolation (Idempotent cleanup)
+DROP POLICY IF EXISTS "Strict Tenant Isolation (Businesses)" ON businesses;
+DROP POLICY IF EXISTS "Strict Tenant Isolation (pos_events)" ON pos_events;
+DROP POLICY IF EXISTS "Strict Tenant Isolation (Sales)" ON sales;
+DROP POLICY IF EXISTS "Strict Tenant Isolation (Products)" ON products;
+DROP POLICY IF EXISTS "Strict Tenant Isolation (Expenses)" ON expenses;
+DROP POLICY IF EXISTS "Strict Tenant Isolation (Mpesa Configs)" ON business_mpesa_configs;
+DROP POLICY IF EXISTS "Strict Tenant Isolation (Payment Requests)" ON payment_requests;
+
+CREATE POLICY "Strict Tenant Isolation (Businesses)" ON businesses FOR ALL USING (id = auth.uid()) WITH CHECK (id = auth.uid()); 
+CREATE POLICY "Strict Tenant Isolation (pos_events)" ON pos_events FOR ALL USING (business_id = auth.uid());
+CREATE POLICY "Strict Tenant Isolation (Sales)" ON sales FOR ALL USING (business_id = auth.uid());
+CREATE POLICY "Strict Tenant Isolation (Products)" ON products FOR ALL USING (business_id = auth.uid());
+CREATE POLICY "Strict Tenant Isolation (Expenses)" ON expenses FOR ALL USING (business_id = auth.uid());
+CREATE POLICY "Strict Tenant Isolation (Mpesa Configs)" ON business_mpesa_configs FOR ALL USING (business_id = auth.uid());
+CREATE POLICY "Strict Tenant Isolation (Payment Requests)" ON payment_requests FOR ALL USING (business_id = auth.uid());
 
 -- Prevent overwrite destruction on immutable financial tables for staff
 REVOKE UPDATE, DELETE ON sales FROM authenticated;
@@ -223,9 +266,13 @@ CREATE TABLE IF NOT EXISTS inventory_ledger (
     recorded_at BIGINT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_inventory_product ON inventory_ledger(product_id, business_id);
+
 ALTER TABLE inventory_ledger ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Strict Tenant Isolation (Inventory Ledger)" ON inventory_ledger FOR ALL USING (business_id IN (SELECT id FROM businesses WHERE id::text = auth.uid()::text));
-REVOKE UPDATE, DELETE ON inventory_ledger FROM authenticated;
+DROP POLICY IF EXISTS "Strict Tenant Isolation (Inventory Ledger)" ON inventory_ledger;
+CREATE POLICY "Strict Tenant Isolation (Inventory Ledger)" ON inventory_ledger FOR ALL USING (business_id = auth.uid());
+-- Idempotent sync requires update/select
+GRANT ALL ON pos_events TO authenticated;
+GRANT ALL ON business_mpesa_configs TO authenticated;
 
 -- Dead-Letter Queue (DLQ)
 CREATE TABLE IF NOT EXISTS dlq (
@@ -237,4 +284,52 @@ CREATE TABLE IF NOT EXISTS dlq (
     failed_at TIMESTAMPTZ DEFAULT now()
 );
 ALTER TABLE dlq ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Strict Tenant Isolation (DLQ)" ON dlq;
 CREATE POLICY "Strict Tenant Isolation (DLQ)" ON dlq FOR ALL USING (business_id IN (SELECT id FROM businesses WHERE id::text = auth.uid()::text));
+-- 9. Automatic Activation Logic
+CREATE OR REPLACE FUNCTION handle_payment_success()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.status = 'success' AND (OLD.status = 'pending' OR OLD.status IS NULL) THEN
+        -- Activate the business
+        UPDATE businesses
+        SET status = 'active',
+            expiry_date = CASE 
+                WHEN expiry_date > (extract(epoch from now()) * 1000) 
+                THEN expiry_date + (30 * 24 * 60 * 60 * 1000) -- Add 30 days to existing
+                ELSE (extract(epoch from now()) * 1000) + (30 * 24 * 60 * 60 * 1000) -- Add 30 days from now
+            END
+        WHERE id = NEW.business_id;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS on_payment_success ON payment_requests;
+CREATE TRIGGER on_payment_success
+    AFTER UPDATE ON payment_requests
+    FOR EACH ROW
+    EXECUTE FUNCTION handle_payment_success();
+
+-- 10. Automatic Identity Sync (Auth -> Public)
+CREATE OR REPLACE FUNCTION public.handle_new_user() 
+RETURNS trigger AS $$
+BEGIN
+  INSERT INTO public.businesses (id, name, code, status, package_id, expiry_date, pin)
+  VALUES (
+    new.id, 
+    COALESCE(new.raw_user_meta_data->>'business_name', 'My Business'), 
+    COALESCE(new.raw_user_meta_data->>'business_code', 'BIZ-' || substring(new.id::text, 1, 5)),
+    'active',
+    'hustler',
+    (extract(epoch from now()) * 1000)::bigint + (30::bigint * 24 * 60 * 60 * 1000),
+    '0000'
+  ) ON CONFLICT (id) DO NOTHING;
+  RETURN new;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+CREATE TRIGGER on_auth_user_created
+  AFTER INSERT ON auth.users
+  FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();

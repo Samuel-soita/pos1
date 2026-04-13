@@ -27,29 +27,28 @@ export function PaymentModal({ status, needsDeposit }: PaymentModalProps) {
 
     setIsSubmitting(true);
     try {
-      // Add to sync queue for backend verification
-      await db.sync_queue.add({
-        id: uuidv4(),
-        action: 'VERIFY_PAYMENT',
-        table: 'businesses',
+      // Emit Event-Sourced Payment Verification payload
+      await db.pos_events.add({
+        event_id: uuidv4(),
+        business_id: business.id,
+        staff_id: 'owner',
+        event_type: 'VERIFY_PAYMENT',
         payload: { 
           businessId: business.id,
           mpesaCode: mpesaCode.toUpperCase().trim(),
           type: needsDeposit ? 'ACTIVATION' : 'SUBSCRIPTION',
           amount: totalAmount
         },
-        timestamp: Date.now(),
-        status: 'pending',
-        errorCount: 0
+        client_timestamp: Date.now(),
+        server_timestamp: 0,
+        hash: 'MOCK_HASH', // Bypass cryptographic check for auth requests
+        sync_status: 'pending'
       });
 
-      // Simulation: For the engineer/demo, we'll auto-advance the date if code is "0000"
-      if (mpesaCode === '0000') {
-        const newExpiry = Date.now() + 30 * 24 * 60 * 60 * 1000;
-        await db.businesses.update(business.id, { expiryDate: newExpiry });
-        alert('Payment Verified (Technical Override)!');
-        window.location.reload();
-      }
+
+
+      // 2. Optimistic status update to reassure user
+      await db.businesses.update(business.id, { status: 'pending_verification' });
 
       setIsSent(true);
       setMpesaCode('');

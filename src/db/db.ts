@@ -29,13 +29,15 @@ export interface POSEvent {
   event_id: string; // UUIDv4
   business_id: string;
   staff_id: string;
-  event_type: 'sale_created' | 'stock_reserved' | 'stock_committed' | 'payment_received' | 'shift_opened' | 'stock_rejected';
+  event_type: string;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   payload: any;
   client_timestamp: number;
   server_timestamp: number;
   hash: string;
   sync_status: 'pending' | 'synced' | 'failed' | 'rejected_dlq';
+  retry_count?: number;
+  last_error?: string;
 }
 
 export interface MaterializedSnapshot {
@@ -48,7 +50,6 @@ export interface MaterializedSnapshot {
   updated_at: number;
 }
 
-// Legacy structures (to be deprecated by Snapshots)
 export interface Branch {
   id: string; // UUID
   businessId: string;
@@ -166,7 +167,7 @@ export interface Business {
   kraPin?: string;
   packageId: string; // Dynamic package identifiers for custom plans
   expiryDate: number;
-  status: 'trial' | 'grace' | 'active' | 'pending_payment' | 'suspended';
+  status: 'trial' | 'grace' | 'active' | 'pending_payment' | 'suspended' | 'pending_verification';
   trialUsed: boolean;
   lastPaymentRef?: string;
   suspendedRevenueCount: number; // Tracks 20-sale limit during suspension
@@ -189,28 +190,9 @@ export interface Staff {
   branchId?: string;
 }
 
-export interface SyncQueueItem {
-  id: string; // UUID
-  action: 'INSERT' | 'UPDATE' | 'DELETE' | 'STOCK_DELTA' | 'VERIFY_PAYMENT';
-  table: 'products' | 'sales' | 'purchases' | 'businesses' | 'staff' | 'expenses' | 'recurring_expenses' | 'cash_logs' | 'shifts' | 'branches' | 'payment_requests' | 'inventory_ledger';
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  payload: any;
-  timestamp: number;
-  status: 'pending' | 'failed';
-  errorCount: number;
-  lastError?: string;
-}
-
 export interface Setting {
   key: string;
   value: unknown;
-}
-
-export interface Counter {
-  id: string; // businessId_entityType
-  businessId: string;
-  entityType: string;
-  count: number;
 }
 
 export interface InventoryLedgerEvent {
@@ -224,16 +206,6 @@ export interface InventoryLedgerEvent {
   syncStatus?: 'pending' | 'synced' | 'failed';
 }
 
-export interface DLQItem {
-  id: string;
-  businessId: string;
-  tableName: string;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  payload: any;
-  errorMessage?: string;
-  failedAt: number;
-}
-
 const db = new Dexie('POSDatabase') as Dexie & {
   products: EntityTable<Product, 'id'>;
   sales: EntityTable<Sale, 'id'>;
@@ -242,19 +214,17 @@ const db = new Dexie('POSDatabase') as Dexie & {
   recurring_expenses: EntityTable<RecurringExpense, 'id'>;
   businesses: EntityTable<Business, 'id'>;
   staff: EntityTable<Staff, 'id'>;
-  sync_queue: EntityTable<SyncQueueItem, 'id'>;
   settings: EntityTable<Setting, 'key'>;
   cash_logs: EntityTable<CashLog, 'id'>;
   shifts: EntityTable<Shift, 'id'>;
   branches: EntityTable<Branch, 'id'>;
   counters: EntityTable<Counter, 'id'>;
   inventory_ledger: EntityTable<InventoryLedgerEvent, 'id'>;
-  dlq: EntityTable<DLQItem, 'id'>;
   pos_events: EntityTable<POSEvent, 'event_id'>;
   snapshots: EntityTable<MaterializedSnapshot, 'id'>;
 };
 
-db.version(19).stores({
+db.version(21).stores({
   products: 'id, businessId, branchId, name, price, costPrice, quantity, category, barcode, syncStatus',
   sales: 'id, businessId, branchId, total, totalProfit, timestamp, receiptId, paymentMethod, deviceId, syncStatus',
   purchases: 'id, businessId, branchId, total, timestamp, syncStatus',
@@ -262,15 +232,13 @@ db.version(19).stores({
   recurring_expenses: 'id, businessId, branchId, frequency, nextRun, isActive, syncStatus',
   businesses: 'id, code, name, packageId, [name+code+pin], syncStatus',
   staff: 'id, businessId, branchId, code, idNumber, phoneNumber, [businessId+code+pin], syncStatus',
-  sync_queue: 'id, action, table, timestamp, status, errorCount',
   settings: 'key',
   cash_logs: 'id, businessId, branchId, staffId, date, status, [businessId+date], syncStatus',
   shifts: 'id, businessId, staffId, branchId, status, startTime, syncStatus',
   branches: 'id, businessId, name, syncStatus',
   counters: 'id, businessId, entityType',
   inventory_ledger: 'id, businessId, productId, recordedAt, traceId, [productId+businessId], syncStatus',
-  dlq: 'id, businessId, tableName, failedAt',
-  pos_events: 'event_id, business_id, event_type, server_timestamp, sync_status',
+  pos_events: 'event_id, business_id, event_type, server_timestamp, sync_status, retry_count',
   snapshots: 'id, business_id, view_type'
 });
 

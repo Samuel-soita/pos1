@@ -168,6 +168,12 @@ export function useSales() {
             });
           }
         }
+        // 4. Update Emergency Sale Counter if suspended
+        if (business!.status === 'suspended') {
+          await db.businesses.update(businessId, {
+            suspendedRevenueCount: (business!.suspendedRevenueCount || 0) + 1
+          });
+        }
       });
 
       // Record to active shift if applicable (Shift system needs refactor eventually but ok for now)

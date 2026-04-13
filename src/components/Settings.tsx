@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { db } from '../db/db';
-import { Store, Calculator, ShieldCheck, Lock, Printer, Download, Sparkles, CreditCard } from 'lucide-react';
+import { Store, Calculator, ShieldCheck, Lock, Printer, Download, Sparkles, CreditCard, Smartphone } from 'lucide-react';
+import { generateTraceableId, getDeviceId } from '../utils/idUtils';
 import { usePrinter } from '../hooks/usePrinter';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useSync } from '../hooks/useSync';
@@ -8,12 +9,13 @@ import { useAuth } from '../hooks/useAuth';
 import { useSubscription, type Plan } from '../hooks/useSubscription';
 import { PackageSelection } from './PackageSelection';
 import { SyncDashboard } from './SyncDashboard';
+import { supabase } from '../lib/supabase';
 
 export function Settings() {
   const [businessName, setBusinessName] = useState('');
   // useSync initializes background updates
   useSync();
-  const { connectBT, connectUSB, connectSerial, isConnected, deviceName, isSupported, transport } = usePrinter();
+  const { connectBT, connectUSB, connectSerial, isConnected, deviceName, isSupported, transport, isReconnecting } = usePrinter();
   const { userType, business } = useAuth();
   const { packages, status, daysLeft } = useSubscription();
   const [showPlanSelector, setShowPlanSelector] = useState(false);
@@ -62,6 +64,11 @@ export function Settings() {
     setOwnerPin(ownerPinSetting.value as string);
   }
 
+  // M-Pesa Integration State (Universal Hub)
+  const [useMpesa, setUseMpesa] = useState(false);
+  const [payoutDestination, setPayoutDestination] = useState('');
+  const [convenienceFee, setConvenienceFee] = useState(0);
+
   useEffect(() => {
     // Check storage persistence
     if (navigator.storage && navigator.storage.persisted) {
@@ -69,29 +76,133 @@ export function Settings() {
     }
   }, []);
 
+  // Load Business M-Pesa Config if exists
+  useEffect(() => {
+    if (business?.id) {
+       supabase
+         .from('business_mpesa_configs')
+         .select('*')
+         .eq('business_id', business.id)
+         .maybeSingle()
+         .then(({ data }) => {
+           if (data) {
+             setUseMpesa(data.is_enabled);
+             setPayoutDestination(data.payout_destination || '');
+             setConvenienceFee(data.convenience_fee || 0);
+           }
+         });
+    }
+  }, [business?.id]);
+
+  const handleSaveMpesaConfig = async () => {
+    if (!business) return;
+    const { error } = await supabase
+      .from('business_mpesa_configs')
+      .upsert({
+        business_id: business.id,
+        payout_destination: payoutDestination,
+        convenience_fee: convenienceFee,
+        is_enabled: useMpesa,
+        updated_at: new Date().toISOString()
+      });
+
+    if (error) {
+      alert('Error saving M-Pesa config: ' + error.message);
+    } else {
+      alert('M-Pesa Integration updated successfully!');
+    }
+  };
+
   const handleUpdateProfile = async () => {
     if (!business) return;
-    await db.businesses.update(business.id, { 
+    const deviceId = await getDeviceId();
+    const now = Date.now();
+    
+    const updates = { 
       name: businessName,
       telephone,
       address,
       kraPin
+    };
+
+    await db.transaction('rw', [db.businesses, db.settings, db.pos_events, db.counters], async () => {
+      await db.businesses.update(business.id, updates);
+      await db.settings.put({ key: 'business_name', value: businessName });
+      
+      await db.pos_events.add({
+        event_id: await generateTraceableId('ORD', business.id, business.code, deviceId),
+        business_id: business.id,
+        staff_id: 'owner',
+        event_type: 'BUSINESS_UPDATED',
+        payload: { ...business, ...updates },
+        client_timestamp: now,
+        server_timestamp: 0,
+        hash: 'LATER',
+        sync_status: 'pending'
+      });
     });
-    await db.settings.put({ key: 'business_name', value: businessName });
     alert('Business profile updated successfully!');
   };
 
   const handleSaveTax = async () => {
-    await db.settings.put({ key: 'tax_rate', value: taxRate });
+    if (!business) return;
+    const deviceId = await getDeviceId();
+    const now = Date.now();
+    
+    await db.transaction('rw', [db.settings, db.pos_events, db.counters], async () => {
+      await db.settings.put({ key: 'tax_rate', value: taxRate });
+      await db.pos_events.add({
+        event_id: await generateTraceableId('ORD', business.id, business.code, deviceId),
+        business_id: business.id,
+        staff_id: 'owner',
+        event_type: 'SETTING_UPDATED',
+        payload: { key: 'tax_rate', value: taxRate },
+        client_timestamp: now,
+        server_timestamp: 0,
+        hash: 'LATER',
+        sync_status: 'pending'
+      });
+    });
     alert('Tax rate saved globally!');
   };
 
   const handleSaveSecurity = async () => {
+    if (!business) return;
     if (securityMode === 'staff' && (!ownerPin || ownerPin.length < 4)) {
       return alert('You must set a 4-digit PIN before enabling Staff Restricted Mode.');
     }
-    await db.settings.put({ key: 'security_mode', value: securityMode });
-    await db.settings.put({ key: 'owner_pin', value: ownerPin });
+    const deviceId = await getDeviceId();
+    const now = Date.now();
+
+    await db.transaction('rw', [db.settings, db.pos_events, db.counters], async () => {
+      await db.settings.put({ key: 'security_mode', value: securityMode });
+      await db.settings.put({ key: 'owner_pin', value: ownerPin });
+      
+      await db.pos_events.add({
+        event_id: await generateTraceableId('ORD', business.id, business.code, deviceId),
+        business_id: business.id,
+        staff_id: 'owner',
+        event_type: 'SETTING_UPDATED',
+        payload: { key: 'security_mode', value: securityMode },
+        client_timestamp: now,
+        server_timestamp: 0,
+        hash: 'LATER',
+        sync_status: 'pending'
+      });
+
+      await db.pos_events.add({
+        event_id: await generateTraceableId('ORD', business.id, business.code, deviceId),
+        business_id: business.id,
+        staff_id: 'owner',
+        event_type: 'SETTING_UPDATED',
+        payload: { key: 'owner_pin', value: ownerPin },
+        client_timestamp: now,
+        server_timestamp: 0,
+        hash: 'LATER',
+        sync_status: 'pending'
+      });
+    });
+    
     alert('Security settings enforced! The App will now require this PIN for Analytics/Inventory views.');
     window.location.reload();
   };
@@ -290,6 +401,61 @@ export function Settings() {
           </button>
         </div>
 
+        {/* M-Pesa Integration - Automated Sales */}
+        {userType === 'owner' && (
+          <div className="card" style={{ padding: 'min(24px, 5vw)', border: useMpesa ? '2px solid var(--success)' : '1px solid var(--border)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
+              <h2 style={{ fontSize: '1.5rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: '12px', margin: 0 }}>
+                <Smartphone size={24} color={useMpesa ? "var(--success)" : "var(--primary)"} />
+                M-Pesa Automation
+              </h2>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <span style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-muted)' }}>{useMpesa ? 'ENABLED' : 'DISABLED'}</span>
+                <label className="switch">
+                  <input type="checkbox" checked={useMpesa} onChange={(e) => setUseMpesa(e.target.checked)} />
+                  <span className="slider round"></span>
+                </label>
+              </div>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', opacity: useMpesa ? 1 : 0.6, pointerEvents: useMpesa ? 'auto' : 'none' }}>
+              <div style={{ background: 'rgba(34, 197, 94, 0.05)', padding: '16px', borderRadius: '12px', border: '1px solid rgba(34, 197, 94, 0.2)', marginBottom: '12px' }}>
+                <p style={{ fontSize: '0.85rem', color: '#166534', fontWeight: 600 }}> 
+                   Automated M-Pesa is ENABLED. Customers will pay via a phone prompt, and funds will be logically routed to your records.
+                </p>
+              </div>
+
+              <div className="input-group">
+                <label>Payout Destination (Receive Funds Here)</label>
+                <input 
+                  type="text" 
+                  value={payoutDestination} 
+                  onChange={(e) => setPayoutDestination(e.target.value)} 
+                  placeholder="e.g. 07XXXXXXXX, Paybill, Till, or Pochi" 
+                />
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                  Enter your M-Pesa Number, Paybill, Buy Goods Till, or Pochi la Biashara.
+                </span>
+              </div>
+
+              <div className="input-group">
+                <label>Convenience Fee (KES)</label>
+                <input 
+                  type="number" 
+                  value={convenienceFee} 
+                  onChange={(e) => setConvenienceFee(parseFloat(e.target.value) || 0)} 
+                  placeholder="e.g. 5" 
+                />
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                  This fee is added to the customer total to cover API costs.
+                </span>
+              </div>
+
+              <button className="btn-primary" onClick={handleSaveMpesaConfig}>Save Payment Settings</button>
+            </div>
+          </div>
+        )}
+
         {/* Sync Health Dashboard */}
         {userType === 'owner' && (
           <SyncDashboard />
@@ -341,12 +507,12 @@ export function Settings() {
                   width: '10px', 
                   height: '10px', 
                   borderRadius: '50%', 
-                  background: isConnected ? 'var(--success)' : '#cbd5e1', 
-                  boxShadow: isConnected ? '0 0 8px var(--success)' : 'none' 
+                  background: isConnected ? 'var(--success)' : isReconnecting ? 'var(--warning)' : '#cbd5e1', 
+                  boxShadow: isConnected ? '0 0 8px var(--success)' : isReconnecting ? '0 0 8px var(--warning)' : 'none' 
                 }}></div>
               </div>
               <p style={{ fontWeight: 800, fontSize: '0.9rem' }}>
-                {isConnected ? `${transport}: ${deviceName}` : 'Not Connected'}
+                {isReconnecting ? <span style={{ animation: 'pulse 1.5s infinite', color: '#d97706' }}>Printer reconnecting...</span> : isConnected ? `${transport}: ${deviceName}` : 'Not Connected'}
               </p>
               
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '12px' }}>

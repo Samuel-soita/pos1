@@ -69,13 +69,31 @@ function App() {
       if (navigator.storage && navigator.storage.persist) {
         const isPersisted = await navigator.storage.persisted();
         if (!isPersisted) {
-          const granted = await navigator.storage.persist();
-          console.log(`Persistent storage granted: ${granted}`);
+          await navigator.storage.persist();
         }
       }
     };
     requestPersistentStorage();
   }, []);
+
+  // Idle Background Prefetching: 
+  // Keeps initial boot fast (lazy loading), but silently downloads tabs in the background 
+  // so that when the user clicks 'Sales' or 'Inventory', it loads instantly with zero jank.
+  useEffect(() => {
+    if (businessId) {
+      const timer = setTimeout(() => {
+        import('./components/Sales');
+        import('./components/Inventory');
+        import('./components/Dashboard');
+        import('./components/Settings');
+        import('./components/Reports');
+        import('./components/Expenses');
+        import('./components/StaffManagement');
+        import('./components/History');
+      }, 1500); // 1.5 seconds after boot (when the network is quiet)
+      return () => clearTimeout(timer);
+    }
+  }, [businessId]);
 
   if (isLoading) {
     return <div style={{ display: 'flex', height: '100vh', alignItems: 'center', justifyContent: 'center' }}>Loading...</div>;

@@ -96,10 +96,26 @@ export function StaffManagement({ initialView }: { initialView?: string }) {
         branchId: selectedBranch || undefined
       };
 
-      await db.staff.add(newStaff);
+      await db.transaction('rw', [db.staff, db.pos_events, db.counters, db.settings], async () => {
+        await db.staff.add(newStaff);
+        await db.pos_events.add({
+          event_id: await generateTraceableId('ORD', businessId, business!.code, deviceId),
+          business_id: businessId,
+          staff_id: 'owner',
+          event_type: 'STAFF_CREATED',
+          payload: newStaff,
+          client_timestamp: Date.now(),
+          server_timestamp: 0,
+          hash: 'LATER',
+          sync_status: 'pending'
+        });
+      });
       
+      setFirstName('');
       setLastName('');
       setPin('');
+      setIdNumber('');
+      setPhoneNumber('');
       setSelectedBranch('');
       alert(`Staff added successfully! Login Code: ${nextCode}`);
     } catch (err) {
@@ -114,17 +130,69 @@ export function StaffManagement({ initialView }: { initialView?: string }) {
     e.preventDefault();
     if (!businessId || !newBranchName || !business) return;
     const deviceId = await getDeviceId();
-    await db.branches.add({
-      id: await generateTraceableId('BRH', businessId, business.code, deviceId),
+    const branchId = await generateTraceableId('BRH', businessId, business.code, deviceId);
+    const newBranch = {
+      id: branchId,
       businessId,
       name: newBranchName
+    };
+
+    await db.transaction('rw', [db.branches, db.pos_events, db.counters, db.settings], async () => {
+      await db.branches.add(newBranch);
+      await db.pos_events.add({
+        event_id: await generateTraceableId('ORD', businessId, business.code, deviceId),
+        business_id: businessId,
+        staff_id: 'owner',
+        event_type: 'BRANCH_CREATED',
+        payload: newBranch,
+        client_timestamp: Date.now(),
+        server_timestamp: 0,
+        hash: 'LATER',
+        sync_status: 'pending'
+      });
     });
     setNewBranchName('');
   };
 
+  const handleDeleteBranch = async (id: string) => {
+    if (!businessId || !business) return;
+    if (confirm('Are you sure you want to remove this branch?')) {
+      const deviceId = await getDeviceId();
+      await db.transaction('rw', [db.branches, db.pos_events, db.counters, db.settings], async () => {
+        await db.branches.delete(id);
+        await db.pos_events.add({
+          event_id: await generateTraceableId('ORD', businessId, business.code, deviceId),
+          business_id: businessId,
+          staff_id: 'owner',
+          event_type: 'BRANCH_DELETED',
+          payload: { id },
+          client_timestamp: Date.now(),
+          server_timestamp: 0,
+          hash: 'LATER',
+          sync_status: 'pending'
+        });
+      });
+    }
+  };
+
   const handleDeleteStaff = async (id: string) => {
+    if (!businessId || !business) return;
     if (confirm('Are you sure you want to remove this staff member?')) {
-      await db.staff.delete(id);
+      const deviceId = await getDeviceId();
+      await db.transaction('rw', [db.staff, db.pos_events, db.counters, db.settings], async () => {
+        await db.staff.delete(id);
+        await db.pos_events.add({
+          event_id: await generateTraceableId('ORD', businessId, business.code, deviceId),
+          business_id: businessId,
+          staff_id: 'owner',
+          event_type: 'STAFF_DELETED',
+          payload: { id },
+          client_timestamp: Date.now(),
+          server_timestamp: 0,
+          hash: 'LATER',
+          sync_status: 'pending'
+        });
+      });
     }
   };
 
@@ -307,7 +375,7 @@ export function StaffManagement({ initialView }: { initialView?: string }) {
               <div key={branch.id} style={{ background: '#f8fafc', padding: '16px', borderRadius: '12px', border: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div style={{ fontWeight: 700, fontSize: '0.9rem' }}>{branch.name}</div>
                 <button 
-                  onClick={() => db.branches.delete(branch.id)}
+                  onClick={() => handleDeleteBranch(branch.id)}
                   style={{ background: 'transparent', color: 'var(--danger)', padding: 0 }}
                 >
                   <X size={16} />

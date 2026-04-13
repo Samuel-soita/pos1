@@ -40,27 +40,30 @@ export function useRecurringExpenses() {
           // Update the template
           await db.recurring_expenses.update(item.id, { nextRun });
 
-          // Add to sync queue for both
-          await db.sync_queue.bulkAdd([
-            {
-              id: uuidv4(),
-              action: 'INSERT',
-              table: 'expenses',
-              payload: newExpense,
-              timestamp: now,
-              status: 'pending',
-              errorCount: 0
-            },
-            {
-              id: uuidv4(),
-              action: 'UPDATE',
-              table: 'recurring_expenses',
-              payload: { ...item, nextRun },
-              timestamp: now,
-              status: 'pending',
-              errorCount: 0
-            }
-          ]);
+          // Emit events for both
+          await db.pos_events.add({
+            event_id: uuidv4(),
+            business_id: item.businessId,
+            staff_id: 'system',
+            event_type: 'EXPENSE_CREATED',
+            payload: newExpense,
+            client_timestamp: now,
+            server_timestamp: 0,
+            hash: 'MOCK_HASH',
+            sync_status: 'pending'
+          });
+
+          await db.pos_events.add({
+            event_id: uuidv4(),
+            business_id: item.businessId,
+            staff_id: 'system',
+            event_type: 'RECURRING_EXPENSE_UPDATED',
+            payload: { ...item, nextRun },
+            client_timestamp: now,
+            server_timestamp: 0,
+            hash: 'MOCK_HASH',
+            sync_status: 'pending'
+          });
 
           console.log(`Processed recurring expense: ${item.title}`);
         }

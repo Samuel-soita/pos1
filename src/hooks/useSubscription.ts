@@ -3,7 +3,7 @@ import { db } from '../db/db';
 import { useAuth } from './useAuth';
 import { useLiveQuery } from 'dexie-react-hooks';
 
-export type SubscriptionStatus = 'trial' | 'active' | 'grace' | 'pending_payment' | 'suspended';
+export type SubscriptionStatus = 'trial' | 'active' | 'grace' | 'pending_payment' | 'suspended' | 'pending_verification';
 
 export interface Plan {
   id: string;
@@ -25,25 +25,29 @@ export function useSubscription() {
   const { business } = useAuth();
   const [now, setNow] = useState(() => Date.now());
 
-  // Phase 4 Hardening: Prevent basic local clock drift abuse by syncing with verified entitlement tokens
+  // Phase 4 Hardening: Monotonic Time Protection (Anti-fraud)
+  const lastSeenTime = useLiveQuery(async () => {
+    const setting = await db.settings.get('latest_observed_time');
+    return (setting?.value as number) || 0;
+  }, []) || 0;
+
   useEffect(() => {
-    const timer = setInterval(() => {
-      let authoritativeNow = Date.now();
-      try {
-        const entitlementStr = localStorage.getItem(`entitlement_${business?.id}`);
-        if (entitlementStr) {
-          const payload = JSON.parse(atob(entitlementStr.split('.')[1]));
-          if (payload.server_now) {
-            authoritativeNow = Math.max(Date.now(), payload.server_now);
-          }
-        }
-      } catch {
-        // ignore
+    const timer = setInterval(async () => {
+      const localNow = Date.now();
+      const lastSyncTimeStr = localStorage.getItem(`entitlement_${business?.id}_last_sync`);
+      const lastSyncTime = lastSyncTimeStr ? parseInt(lastSyncTimeStr, 10) : 0;
+      
+      // High-Water Mark: Time can only move FORWARD
+      const authoritativeNow = Math.max(localNow, lastSyncTime, lastSeenTime);
+      
+      if (authoritativeNow > lastSeenTime) {
+        await db.settings.put({ key: 'latest_observed_time', value: authoritativeNow });
       }
+      
       setNow(authoritativeNow);
-    }, 60000);
+    }, 10000); // Check every 10 seconds
     return () => clearInterval(timer);
-  }, [business?.id]);
+  }, [business?.id, lastSeenTime]);
 
   const statusInfo = useMemo(() => {
     if (!business) return { status: 'active' as SubscriptionStatus, daysLeft: 0, message: '', isLocked: false, isTrial: false, limitReached: false, trialUsed: false };
@@ -53,10 +57,12 @@ export function useSubscription() {
     const isTrial = businessStatus === 'trial';
 
     // 1. Pending Payment Flow (Trust-First)
-    if (businessStatus === 'pending_payment') {
+    if (businessStatus === 'pending_payment' || businessStatus === 'pending_verification') {
       return {
-        status: 'pending_payment' as SubscriptionStatus,
-        message: 'Payment detected, confirming...',
+        status: businessStatus as SubscriptionStatus,
+        message: businessStatus === 'pending_verification' 
+          ? 'Payment under review (1–5 mins)...' 
+          : 'Payment detected, confirming...',
         isLocked: false,
         daysLeft: 0,
         isTrial: false,
@@ -79,8 +85,8 @@ export function useSubscription() {
       };
     }
 
-    // 3. Grace Period Flow (3 Days)
-    if (now < expiryDate + threeDaysMs) {
+    // 3. Grace Period Flow (3 Days) - Only for active subscriptions, not trials
+    if (!isTrial && now < expiryDate + threeDaysMs) {
       const diff = (expiryDate + threeDaysMs) - now;
       const days = Math.ceil(diff / (24 * 60 * 60 * 1000));
       return {
@@ -93,12 +99,12 @@ export function useSubscription() {
       };
     }
 
-    // 4. Suspended Flow (Smart Lock - 20 Sales)
-    const limitReached = suspendedRevenueCount >= 20;
+    // 4. Suspended Flow (Smart Lock - 5 Sales)
+    const limitReached = suspendedRevenueCount >= 5;
     return {
       status: 'suspended' as SubscriptionStatus,
       daysLeft: 0,
-      message: limitReached ? 'Emergency sales limit reached' : `Suspended: ${20 - suspendedRevenueCount} emergency sales left`,
+      message: limitReached ? 'Emergency sales limit reached' : `Suspended: ${5 - suspendedRevenueCount} emergency sales left`,
       isLocked: limitReached,
       isTrial: false,
       limitReached,

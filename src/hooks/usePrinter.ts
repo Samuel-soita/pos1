@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import type { Sale } from '../db/db';
 import { EscPosEncoder } from '../lib/escpos';
 
@@ -9,7 +9,7 @@ interface BluetoothCharacteristic {
   writeValueWithoutResponse: (data: Uint8Array) => Promise<void>;
 }
 
-interface BluetoothDevice {
+interface BluetoothDevice extends EventTarget {
   gatt?: {
     connected: boolean;
     connect: () => Promise<void>;
@@ -24,8 +24,152 @@ export function usePrinter() {
   const [usbDevice, setUsbDevice] = useState<any>(null);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [serialPort, setSerialPort] = useState<any>(null);
+  
   const [isPrinting, setIsPrinting] = useState(false);
+  const [isReconnecting, setIsReconnecting] = useState(false);
   const [transport, setTransport] = useState<'BT' | 'USB' | 'SERIAL' | null>(null);
+  
+  const reconnectIntervalRef = useRef<number | null>(null);
+
+  const establishUSB = useCallback(async (device: { open: () => Promise<void>, selectConfiguration: (n: number) => Promise<void>, claimInterface: (n: number) => Promise<void> }) => {
+    await device.open();
+    await device.selectConfiguration(1);
+    await device.claimInterface(0);
+    setUsbDevice(device);
+    setTransport('USB');
+    localStorage.setItem('preferred_printer', 'USB');
+  }, []);
+
+  const establishSerial = useCallback(async (port: { open: (opts: { baudRate: number }) => Promise<void> }) => {
+    await port.open({ baudRate: 9600 });
+    setSerialPort(port);
+    setTransport('SERIAL');
+    localStorage.setItem('preferred_printer', 'SERIAL');
+  }, []);
+
+  // Break cycle with ref for triggerAutoReconnect
+  const triggerAutoReconnectRef = useRef<(failedTransport: 'BT' | 'USB' | 'SERIAL') => void>(() => {});
+
+  const handleBTDisconnect = useCallback(() => {
+    setTransport(null);
+    setBtDevice(null);
+    if (triggerAutoReconnectRef.current) {
+      triggerAutoReconnectRef.current('BT');
+    }
+  }, []);
+
+  const establishBT = useCallback(async (device: BluetoothDevice) => {
+    if (device.gatt && !device.gatt.connected) {
+      await device.gatt.connect();
+    }
+    device.addEventListener('gattserverdisconnected', handleBTDisconnect);
+    setBtDevice(device);
+    setTransport('BT');
+    localStorage.setItem('preferred_printer', 'BT');
+  }, [handleBTDisconnect]);
+
+  const triggerAutoReconnect = useCallback((failedTransport: 'BT' | 'USB' | 'SERIAL') => {
+    setIsReconnecting(true);
+    let attempts = 0;
+    const maxAttempts = 24; // 120 seconds max
+
+    if (reconnectIntervalRef.current) clearInterval(reconnectIntervalRef.current);
+
+    reconnectIntervalRef.current = window.setInterval(async () => {
+      attempts++;
+      if (attempts > maxAttempts) {
+        if (reconnectIntervalRef.current) clearInterval(reconnectIntervalRef.current);
+        setIsReconnecting(false);
+        return;
+      }
+
+      try {
+        if (failedTransport === 'USB' && 'usb' in navigator) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const devices = await (navigator as any).usb.getDevices();
+          if (devices.length > 0) {
+            await establishUSB(devices[0]);
+            setIsReconnecting(false);
+            if (reconnectIntervalRef.current) clearInterval(reconnectIntervalRef.current);
+          }
+        } else if (failedTransport === 'SERIAL' && 'serial' in navigator) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const ports = await (navigator as any).serial.getPorts();
+          if (ports.length > 0) {
+            await establishSerial(ports[0]);
+            setIsReconnecting(false);
+            if (reconnectIntervalRef.current) clearInterval(reconnectIntervalRef.current);
+          }
+        } else if (failedTransport === 'BT' && 'bluetooth' in navigator) {
+           // eslint-disable-next-line @typescript-eslint/no-explicit-any
+           if (typeof (navigator.bluetooth as any).getDevices === 'function') {
+             // eslint-disable-next-line @typescript-eslint/no-explicit-any
+             const devices = await (navigator.bluetooth as any).getDevices();
+             if (devices.length > 0) {
+                await establishBT(devices[0]);
+                setIsReconnecting(false);
+                if (reconnectIntervalRef.current) clearInterval(reconnectIntervalRef.current);
+             }
+           }
+        }
+      } catch {
+        // Silently fail and let loop retry
+      }
+    }, 5000);
+  }, [establishUSB, establishSerial, establishBT]);
+
+  useEffect(() => {
+    triggerAutoReconnectRef.current = triggerAutoReconnect;
+  }, [triggerAutoReconnect]);
+
+  useEffect(() => {
+    const onUsbDisconnect = () => {
+      setTransport(t => {
+        if (t === 'USB') {
+           setUsbDevice(null);
+           triggerAutoReconnect('USB');
+        }
+        return null; // Will trigger re-render
+      });
+    };
+
+    const onSerialDisconnect = () => {
+      setTransport(t => {
+         if (t === 'SERIAL') {
+            setSerialPort(null);
+            triggerAutoReconnect('SERIAL');
+         }
+         return null;
+      });
+    };
+
+    if ('usb' in navigator) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (navigator as any).usb.addEventListener('disconnect', onUsbDisconnect);
+    }
+    if ('serial' in navigator) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (navigator as any).serial.addEventListener('disconnect', onSerialDisconnect);
+    }
+
+    return () => {
+      if ('usb' in navigator) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (navigator as any).usb.removeEventListener('disconnect', onUsbDisconnect);
+      }
+      if ('serial' in navigator) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (navigator as any).serial.removeEventListener('disconnect', onSerialDisconnect);
+      }
+    };
+  }, [triggerAutoReconnect]);
+
+  useEffect(() => {
+    const saved = localStorage.getItem('preferred_printer');
+    if (saved) {
+      triggerAutoReconnect(saved as 'BT' | 'USB' | 'SERIAL');
+    }
+  }, [triggerAutoReconnect]);
 
   const connectBT = async () => {
     try {
@@ -34,10 +178,7 @@ export function usePrinter() {
         acceptAllDevices: true,
         optionalServices: ['000018f0-0000-1000-8000-00805f9b34fb', 'e7810a71-73ae-499d-8c15-faa9aef0c3f2']
       });
-      setBtDevice(device);
-      setTransport('BT');
-      setUsbDevice(null);
-      setSerialPort(null);
+      await establishBT(device);
       return true;
     } catch (e) {
       console.warn("BT failed:", e);
@@ -49,13 +190,7 @@ export function usePrinter() {
     try {
       // @ts-expect-error - USB API
       const device = await navigator.usb.requestDevice({ filters: [] });
-      await device.open();
-      await device.selectConfiguration(1);
-      await device.claimInterface(0);
-      setUsbDevice(device);
-      setTransport('USB');
-      setBtDevice(null);
-      setSerialPort(null);
+      await establishUSB(device);
       return true;
     } catch (e) {
       console.warn("USB failed:", e);
@@ -67,11 +202,7 @@ export function usePrinter() {
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const port = await (navigator as any).serial.requestPort();
-      await port.open({ baudRate: 9600 });
-      setSerialPort(port);
-      setTransport('SERIAL');
-      setBtDevice(null);
-      setUsbDevice(null);
+      await establishSerial(port);
       return true;
     } catch (e) {
       console.warn("Serial failed:", e);
@@ -80,10 +211,10 @@ export function usePrinter() {
   };
   
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const writeChunked = async (transport: 'BT' | 'USB' | 'SERIAL', device: any, data: Uint8Array) => {
+  const writeChunked = async (transportType: 'BT' | 'USB' | 'SERIAL', device: any, data: Uint8Array) => {
     const CHUNK_SIZE = 512;
     
-    if (transport === 'BT') {
+    if (transportType === 'BT') {
       const gatt = device.gatt;
       if (!gatt.connected) await gatt.connect();
       const services = await gatt.getPrimaryServices();
@@ -102,10 +233,9 @@ export function usePrinter() {
         else await characteristic.writeValueWithoutResponse(chunk);
         await new Promise(r => setTimeout(r, 50));
       }
-    } else if (transport === 'USB') {
-      // Most thermal printers use Endpoint 1 for out
+    } else if (transportType === 'USB') {
       await device.transferOut(1, data);
-    } else if (transport === 'SERIAL') {
+    } else if (transportType === 'SERIAL') {
       const writer = device.writable.getWriter();
       await writer.write(data);
       writer.releaseLock();
@@ -158,6 +288,7 @@ export function usePrinter() {
     connectSerial,
     printReceipt,
     isPrinting,
+    isReconnecting,
     transport,
     isConnected: !!transport,
     deviceName: btDevice?.name || usbDevice?.productName || 'Serial Printer',

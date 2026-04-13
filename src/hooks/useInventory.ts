@@ -36,48 +36,54 @@ export function useInventory(branchFilter?: string) {
       syncStatus: 'pending' as const
     };
     
-    await db.transaction('rw', db.products, db.sync_queue, db.counters, db.settings, async () => {
+    await db.transaction('rw', db.products, db.pos_events, db.counters, db.settings, async () => {
       await db.products.add(newProduct);
-      await db.sync_queue.add({
-        id: await generateTraceableId('ORD', businessId, business.code, deviceId),
-        action: 'INSERT',
-        table: 'products',
+      await db.pos_events.add({
+        event_id: await generateTraceableId('ORD', businessId, business.code, deviceId),
+        business_id: businessId,
+        staff_id: userType === 'owner' ? 'owner' : (userType || 'unknown'),
+        event_type: 'PRODUCT_CREATED',
         payload: newProduct,
-        timestamp: Date.now(),
-        status: 'pending',
-        errorCount: 0
+        client_timestamp: Date.now(),
+        server_timestamp: 0,
+        hash: 'MOCK_HASH',
+        sync_status: 'pending'
       });
     });
   };
 
   const updateProduct = async (id: string, updates: Partial<Product>) => {
-    await db.transaction('rw', db.products, db.sync_queue, db.counters, db.settings, async () => {
+    await db.transaction('rw', db.products, db.pos_events, db.counters, db.settings, async () => {
       const deviceId = await getDeviceId();
       await db.products.update(id, { ...updates, updatedAt: Date.now() });
-      await db.sync_queue.add({
-        id: await generateTraceableId('PRD', businessId!, business!.code, deviceId),
-        action: 'UPDATE',
-        table: 'products',
+      await db.pos_events.add({
+        event_id: await generateTraceableId('PRD', businessId!, business!.code, deviceId),
+        business_id: businessId!,
+        staff_id: userType === 'owner' ? 'owner' : (userType || 'unknown'),
+        event_type: 'PRODUCT_UPDATED',
         payload: { id, ...updates },
-        timestamp: Date.now(),
-        status: 'pending',
-        errorCount: 0
+        client_timestamp: Date.now(),
+        server_timestamp: 0,
+        hash: 'MOCK_HASH',
+        sync_status: 'pending'
       });
     });
   };
 
   const deleteProduct = async (id: string) => {
-    await db.transaction('rw', db.products, db.sync_queue, db.counters, db.settings, async () => {
+    await db.transaction('rw', db.products, db.pos_events, db.counters, db.settings, async () => {
       const deviceId = await getDeviceId();
       await db.products.delete(id);
-      await db.sync_queue.add({
-        id: await generateTraceableId('PRD', businessId!, business!.code, deviceId),
-        action: 'DELETE',
-        table: 'products',
+      await db.pos_events.add({
+        event_id: await generateTraceableId('PRD', businessId!, business!.code, deviceId),
+        business_id: businessId!,
+        staff_id: userType === 'owner' ? 'owner' : (userType || 'unknown'),
+        event_type: 'PRODUCT_DELETED',
         payload: { id },
-        timestamp: Date.now(),
-        status: 'pending',
-        errorCount: 0
+        client_timestamp: Date.now(),
+        server_timestamp: 0,
+        hash: 'MOCK_HASH',
+        sync_status: 'pending'
       });
     });
   };
@@ -85,7 +91,7 @@ export function useInventory(branchFilter?: string) {
   const restockProduct = async (id: string, quantityToAdd: number) => {
     const product = await db.products.get(id);
     if (product) {
-      await db.transaction('rw', [db.products, db.sync_queue, db.inventory_ledger, db.counters, db.settings], async () => {
+      await db.transaction('rw', [db.products, db.pos_events, db.inventory_ledger, db.counters, db.settings], async () => {
         const deviceId = await getDeviceId();
         await db.products.update(id, { quantity: product.quantity + quantityToAdd, updatedAt: Date.now() });
         
@@ -101,14 +107,16 @@ export function useInventory(branchFilter?: string) {
         };
         await db.inventory_ledger.add(ledgerEvent);
 
-        await db.sync_queue.add({
-          id: await generateTraceableId('LED', businessId!, business!.code, deviceId),
-          action: 'INSERT',
-          table: 'inventory_ledger',
+        await db.pos_events.add({
+          event_id: await generateTraceableId('LED', businessId!, business!.code, deviceId),
+          business_id: businessId!,
+          staff_id: userType === 'owner' ? 'owner' : (userType || 'unknown'),
+          event_type: 'INVENTORY_RESTOCKED',
           payload: ledgerEvent,
-          timestamp: Date.now(),
-          status: 'pending',
-          errorCount: 0
+          client_timestamp: Date.now(),
+          server_timestamp: 0,
+          hash: 'MOCK_HASH',
+          sync_status: 'pending'
         });
       });
     }
