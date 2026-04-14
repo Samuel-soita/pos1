@@ -4,6 +4,8 @@ import { v4 as uuidv4 } from 'uuid';
 import { Lock, Smartphone, Send, CheckCircle } from 'lucide-react';
 import { type SubscriptionStatus, useSubscription } from '../hooks/useSubscription';
 import { useAuth } from '../hooks/useAuth';
+import { generateEventHash } from '../utils/hashUtils';
+import { playChime } from '../utils/audio';
 
 interface PaymentModalProps {
   status: SubscriptionStatus;
@@ -27,21 +29,25 @@ export function PaymentModal({ status, needsDeposit }: PaymentModalProps) {
 
     setIsSubmitting(true);
     try {
+      const payload = { 
+        businessId: business.id,
+        mpesaCode: mpesaCode.toUpperCase().trim(),
+        type: needsDeposit ? 'ACTIVATION' : 'SUBSCRIPTION',
+        amount: totalAmount
+      };
+      
+      const eventHash = await generateEventHash(payload);
+
       // Emit Event-Sourced Payment Verification payload
       await db.pos_events.add({
         event_id: uuidv4(),
         business_id: business.id,
         staff_id: 'owner',
         event_type: 'VERIFY_PAYMENT',
-        payload: { 
-          businessId: business.id,
-          mpesaCode: mpesaCode.toUpperCase().trim(),
-          type: needsDeposit ? 'ACTIVATION' : 'SUBSCRIPTION',
-          amount: totalAmount
-        },
+        payload,
         client_timestamp: Date.now(),
         server_timestamp: 0,
-        hash: 'MOCK_HASH', // Bypass cryptographic check for auth requests
+        hash: eventHash,
         sync_status: 'pending'
       });
 
@@ -51,6 +57,7 @@ export function PaymentModal({ status, needsDeposit }: PaymentModalProps) {
       await db.businesses.update(business.id, { status: 'pending_verification' });
 
       setIsSent(true);
+      playChime();
       setMpesaCode('');
     } catch (err) {
       console.error('Failed to submit M-Pesa code:', err);

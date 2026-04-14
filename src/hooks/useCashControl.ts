@@ -2,6 +2,8 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db, type CashLog } from '../db/db';
 import { useAuth } from './useAuth';
 import { generateTraceableId, getDeviceId } from '../utils/idUtils';
+import { generateEventHash } from '../utils/hashUtils';
+import { playBeep } from '../utils/audio';
 
 export function useCashControl() {
   const { businessId, business, branchId, staff } = useAuth();
@@ -70,17 +72,22 @@ export function useCashControl() {
 
     await db.transaction('rw', db.cash_logs, db.pos_events, db.counters, db.settings, async () => {
       await db.cash_logs.add(newLog);
+      
+      const payload = newLog;
+      const eventHash = await generateEventHash(payload);
+
       await db.pos_events.add({
         event_id: await generateTraceableId('ORD', businessId, business.code, deviceId),
         business_id: businessId,
         staff_id: staff?.id || 'owner',
         event_type: 'CASH_REGISTER_OPENED',
-        payload: newLog,
+        payload,
         client_timestamp: Date.now(),
         server_timestamp: 0,
-        hash: 'MOCK_HASH',
+        hash: eventHash,
         sync_status: 'pending'
       });
+      playBeep();
     });
   };
 
@@ -100,17 +107,22 @@ export function useCashControl() {
 
     await db.transaction('rw', db.cash_logs, db.pos_events, db.counters, db.settings, async () => {
       await db.cash_logs.update(currentLog.id, update);
+      
+      const payload = { ...currentLog, ...update };
+      const eventHash = await generateEventHash(payload);
+
       await db.pos_events.add({
         event_id: await generateTraceableId('ORD', businessId!, business.code, deviceId),
         business_id: businessId!,
         staff_id: currentLog.staffId,
         event_type: 'CASH_REGISTER_CLOSED',
-        payload: { ...currentLog, ...update },
+        payload,
         client_timestamp: Date.now(),
         server_timestamp: 0,
-        hash: 'MOCK_HASH',
+        hash: eventHash,
         sync_status: 'pending'
       });
+      playBeep();
     });
   };
 

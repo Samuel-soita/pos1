@@ -3,6 +3,8 @@ import { db } from '../db/db';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { Receipt, Plus, Trash2, Calendar, Filter, TrendingDown, Clock, Repeat } from 'lucide-react';
 import { generateTraceableId, getDeviceId } from '../utils/idUtils';
+import { generateEventHash } from '../utils/hashUtils';
+import { playBeep } from '../utils/audio';
 import { useAuth } from '../hooks/useAuth';
 
 export function Expenses({ initialView }: { initialView?: string }) {
@@ -38,17 +40,22 @@ export function Expenses({ initialView }: { initialView?: string }) {
       });
       const updated = await db.expenses.get(id);
       const deviceId = await getDeviceId();
+      
+      const payload = updated;
+      const eventHash = await generateEventHash(payload);
+
       await db.pos_events.add({
         event_id: await generateTraceableId('EXP', businessId!, business!.code, deviceId),
         business_id: businessId!,
         staff_id: 'owner',
         event_type: 'EXPENSE_UPDATED',
-        payload: updated,
+        payload,
         client_timestamp: now,
         server_timestamp: 0,
-        hash: 'MOCK_HASH',
+        hash: eventHash,
         sync_status: 'pending'
       });
+      playBeep();
     });
   }, [businessId, business]);
 
@@ -58,17 +65,22 @@ export function Expenses({ initialView }: { initialView?: string }) {
       const deviceId = await getDeviceId();
       await db.transaction('rw', db.expenses, db.pos_events, db.counters, db.settings, async () => {
           await db.expenses.delete(id);
+          
+          const payload = { id };
+          const eventHash = await generateEventHash(payload);
+
           await db.pos_events.add({
             event_id: await generateTraceableId('EXP', businessId!, business!.code, deviceId),
             business_id: businessId!,
             staff_id: 'owner',
             event_type: 'EXPENSE_DELETED',
-            payload: { id },
+            payload,
             client_timestamp: now,
             server_timestamp: 0,
-            hash: 'MOCK_HASH',
+            hash: eventHash,
             sync_status: 'pending'
           });
+          playBeep();
         });
     }
   }, [businessId, business]);
@@ -240,17 +252,20 @@ function AddExpenseModal({ onClose, businessId }: { onClose: () => void, busines
       };
 
       await db.expenses.add(newExpense);
+      const payload = newExpense;
+      const eventHash = await generateEventHash(payload);
       await db.pos_events.add({
         event_id: await generateTraceableId('EXP', businessId, business!.code, deviceId),
         business_id: businessId,
         staff_id: userType || 'unknown',
         event_type: 'EXPENSE_CREATED',
-        payload: newExpense,
+        payload,
         client_timestamp: now,
         server_timestamp: 0,
-        hash: 'MOCK_HASH',
+        hash: eventHash,
         sync_status: 'pending'
       });
+      playBeep();
     });
 
     onClose();
@@ -340,17 +355,20 @@ function QuickLog({ businessId }: { businessId: string }) {
       };
 
       await db.expenses.add(newExpense);
+      const payload = newExpense;
+      const eventHash = await generateEventHash(payload);
       await db.pos_events.add({
         event_id: await generateTraceableId('EXP', businessId, business!.code, deviceId),
         business_id: businessId,
         staff_id: userType || 'unknown',
         event_type: 'EXPENSE_CREATED',
-        payload: newExpense,
+        payload,
         client_timestamp: now,
         server_timestamp: 0,
-        hash: 'MOCK_HASH',
+        hash: eventHash,
         sync_status: 'pending'
       });
+      playBeep();
     });
 
     setStatus('success');
@@ -446,17 +464,22 @@ function RecurringExpensesModal({ onClose, businessId }: { onClose: () => void, 
     };
 
     await db.recurring_expenses.add(newRec);
+
+    const payload = newRec;
+    const eventHash = await generateEventHash(payload);
+
     await db.pos_events.add({
       event_id: await generateTraceableId('EXP', businessId, business!.code, deviceId),
       business_id: businessId,
       staff_id: 'owner',
       event_type: 'RECURRING_EXPENSE_CREATED',
-      payload: newRec,
+      payload,
       client_timestamp: now,
       server_timestamp: 0,
-      hash: 'MOCK_HASH',
+      hash: eventHash,
       sync_status: 'pending'
     });
+    playBeep();
 
     setShowForm(false);
     setTitle(''); setAmount(''); setCategory('');
@@ -469,17 +492,22 @@ function RecurringExpensesModal({ onClose, businessId }: { onClose: () => void, 
     const deviceId = await getDeviceId();
 
     await db.recurring_expenses.update(item.id, { isActive: newStatus });
+    
+    const payload = { ...item, isActive: newStatus };
+    const eventHash = await generateEventHash(payload);
+
     await db.pos_events.add({
       event_id: await generateTraceableId('EXP', businessId, business!.code, deviceId),
       business_id: businessId,
       staff_id: 'owner',
       event_type: 'RECURRING_EXPENSE_UPDATED',
-      payload: { ...item, isActive: newStatus },
+      payload,
       client_timestamp: now,
       server_timestamp: 0,
-      hash: 'MOCK_HASH',
+      hash: eventHash,
       sync_status: 'pending'
     });
+    playBeep();
   }, [businessId, business]);
 
   return (

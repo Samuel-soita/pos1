@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { db, type Product, type SplitPayment } from '../db/db';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { generateTraceableId, getDeviceId } from '../utils/idUtils';
+import { generateEventHash } from '../utils/hashUtils';
 import { useAuth } from './useAuth';
 import { useCashControl } from './useCashControl';
 import { useShifts } from './useShifts';
@@ -114,28 +115,32 @@ export function useSales() {
     try {
       await db.transaction('rw', [db.products, db.sales, db.pos_events, db.snapshots, db.counters, db.settings], async () => {
         // 1. Immutable Event Generation (Sale)
+        const salePayload = {
+           id: saleId,
+           total,
+           totalProfit,
+           receiptId,
+           items: saleItems,
+           taxRate,
+           taxAmount,
+           paymentMethod,
+           splitPayments,
+           transactionCode,
+           deviceId,
+           branchId
+        };
+        
+        const saleHash = await generateEventHash(salePayload);
+
         const saleEvent = {
           event_id: await generateTraceableId('EVT', businessId, business!.code, deviceId),
           business_id: businessId,
           staff_id: staffId || 'UNKNOWN',
           event_type: 'sale_created' as const,
-          payload: {
-             id: saleId,
-             total,
-             totalProfit,
-             receiptId,
-             items: saleItems,
-             taxRate,
-             taxAmount,
-             paymentMethod,
-             splitPayments,
-             transactionCode,
-             deviceId,
-             branchId
-          },
+          payload: salePayload,
           client_timestamp: timestamp,
           server_timestamp: timestamp,
-          hash: 'LATER',
+          hash: saleHash,
           sync_status: 'pending' as const
         };
         await db.pos_events.add(saleEvent);
@@ -165,18 +170,22 @@ export function useSales() {
         for (const item of cart) {
           const product = await db.products.get(item.id);
           if (product) {
+            const stockPayload = {
+              productId: item.id,
+              delta: -item.quantity
+            };
+            
+            const stockHash = await generateEventHash(stockPayload);
+
             const stockEvent = {
               event_id: await generateTraceableId('EVT', businessId, business!.code, deviceId),
               business_id: businessId,
               staff_id: staffId || 'UNKNOWN',
               event_type: 'stock_reserved' as const,
-              payload: {
-                productId: item.id,
-                delta: -item.quantity
-              },
+              payload: stockPayload,
               client_timestamp: Date.now(),
               server_timestamp: Date.now(),
-              hash: 'LATER',
+              hash: stockHash,
               sync_status: 'pending' as const
             };
             await db.pos_events.add(stockEvent);

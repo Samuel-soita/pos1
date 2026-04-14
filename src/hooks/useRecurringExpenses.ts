@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { db } from '../db/db';
 import { v4 as uuidv4 } from 'uuid';
+import { generateEventHash } from '../utils/hashUtils';
 
 export function useRecurringExpenses() {
   useEffect(() => {
@@ -41,6 +42,7 @@ export function useRecurringExpenses() {
           await db.recurring_expenses.update(item.id, { nextRun });
 
           // Emit events for both
+          const expenseHash = await generateEventHash(newExpense);
           await db.pos_events.add({
             event_id: uuidv4(),
             business_id: item.businessId,
@@ -49,19 +51,21 @@ export function useRecurringExpenses() {
             payload: newExpense,
             client_timestamp: now,
             server_timestamp: 0,
-            hash: 'MOCK_HASH',
+            hash: expenseHash,
             sync_status: 'pending'
           });
 
+          const templatePayload = { ...item, nextRun };
+          const templateHash = await generateEventHash(templatePayload);
           await db.pos_events.add({
             event_id: uuidv4(),
             business_id: item.businessId,
             staff_id: 'system',
             event_type: 'RECURRING_EXPENSE_UPDATED',
-            payload: { ...item, nextRun },
+            payload: templatePayload,
             client_timestamp: now,
             server_timestamp: 0,
-            hash: 'MOCK_HASH',
+            hash: templateHash,
             sync_status: 'pending'
           });
 

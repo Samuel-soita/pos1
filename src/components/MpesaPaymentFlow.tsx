@@ -56,10 +56,22 @@ export function MpesaPaymentFlow({ amount, onSuccess, onCancel }: MpesaPaymentFl
     setPollingStatus('waiting');
 
     try {
+      // Phase 4 Hardening: Phone Normalization (Ensures Safaricom 254... format)
+      let normalizedPhone = phoneNumber.replace(/\D/g, ''); // Remove non-digits
+      if (normalizedPhone.startsWith('0')) {
+        normalizedPhone = '254' + normalizedPhone.substring(1);
+      } else if (normalizedPhone.startsWith('7') || normalizedPhone.startsWith('1')) {
+        normalizedPhone = '254' + normalizedPhone;
+      }
+
+      if (normalizedPhone.length !== 12) {
+        throw new Error("Invalid Kenyan phone number. Please use 254XXXXXXXXX format.");
+      }
+
       const { data, error: funcError } = await supabase.functions.invoke('mpesa-stk-push', {
         body: {
           businessId: business.id,
-          phone: phoneNumber,
+          phone: normalizedPhone,
           amount: totalWithFee,
           paymentType: business.trialUsed ? 'renewal' : 'activation'
         }

@@ -2,6 +2,8 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db, type Shift } from '../db/db';
 import { useAuth } from './useAuth';
 import { v4 as uuidv4 } from 'uuid';
+import { generateEventHash } from '../utils/hashUtils';
+import { playBeep } from '../utils/audio';
 
 export function useShifts() {
   const { staffId, businessId } = useAuth();
@@ -36,18 +38,23 @@ export function useShifts() {
     };
 
     await db.shifts.add(newShift);
+    
+    const payload = newShift;
+    const eventHash = await generateEventHash(payload);
+
     // Sync
     await db.pos_events.add({
       event_id: uuidv4(),
       business_id: businessId,
       staff_id: staffId,
       event_type: 'SHIFT_STARTED',
-      payload: newShift,
+      payload,
       client_timestamp: Date.now(),
       server_timestamp: 0,
-      hash: 'MOCK_HASH',
+      hash: eventHash,
       sync_status: 'pending'
     });
+    playBeep();
 
     return newShift.id;
   };
@@ -63,18 +70,22 @@ export function useShifts() {
 
     await db.shifts.put(updatedShift);
 
+    const payload = updatedShift;
+    const eventHash = await generateEventHash(payload);
+
     // Sync
     await db.pos_events.add({
       event_id: uuidv4(),
       business_id: activeShift.businessId,
       staff_id: activeShift.staffId,
       event_type: 'SHIFT_ENDED',
-      payload: updatedShift,
+      payload,
       client_timestamp: Date.now(),
       server_timestamp: 0,
-      hash: 'MOCK_HASH',
+      hash: eventHash,
       sync_status: 'pending'
     });
+    playBeep();
   };
 
   const recordSaleToShift = async (amount: number, method: string) => {
@@ -88,16 +99,20 @@ export function useShifts() {
     };
 
     await db.shifts.put(updatedShift);
+    
+    const payload = updatedShift;
+    const eventHash = await generateEventHash(payload);
+
     // Sync update
     await db.pos_events.add({
       event_id: uuidv4(),
       business_id: activeShift.businessId,
       staff_id: activeShift.staffId,
       event_type: 'SHIFT_UPDATED',
-      payload: updatedShift,
+      payload,
       client_timestamp: Date.now(),
       server_timestamp: 0,
-      hash: 'MOCK_HASH',
+      hash: eventHash,
       sync_status: 'pending'
     });
   };

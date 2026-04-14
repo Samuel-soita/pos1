@@ -1,6 +1,7 @@
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, type Product } from '../db/db';
 import { generateTraceableId, getDeviceId } from '../utils/idUtils';
+import { generateEventHash } from '../utils/hashUtils';
 import { useAuth } from './useAuth';
 
 export function useInventory(branchFilter?: string) {
@@ -38,15 +39,19 @@ export function useInventory(branchFilter?: string) {
     
     await db.transaction('rw', db.products, db.pos_events, db.counters, db.settings, async () => {
       await db.products.add(newProduct);
+      
+      const payload = newProduct;
+      const eventHash = await generateEventHash(payload);
+      
       await db.pos_events.add({
         event_id: await generateTraceableId('ORD', businessId, business.code, deviceId),
         business_id: businessId,
         staff_id: userType === 'owner' ? 'owner' : (userType || 'unknown'),
         event_type: 'PRODUCT_CREATED',
-        payload: newProduct,
+        payload,
         client_timestamp: Date.now(),
         server_timestamp: 0,
-        hash: 'MOCK_HASH',
+        hash: eventHash,
         sync_status: 'pending'
       });
     });
@@ -56,15 +61,19 @@ export function useInventory(branchFilter?: string) {
     await db.transaction('rw', db.products, db.pos_events, db.counters, db.settings, async () => {
       const deviceId = await getDeviceId();
       await db.products.update(id, { ...updates, updatedAt: Date.now() });
+      
+      const payload = { id, ...updates };
+      const eventHash = await generateEventHash(payload);
+
       await db.pos_events.add({
         event_id: await generateTraceableId('PRD', businessId!, business!.code, deviceId),
         business_id: businessId!,
         staff_id: userType === 'owner' ? 'owner' : (userType || 'unknown'),
         event_type: 'PRODUCT_UPDATED',
-        payload: { id, ...updates },
+        payload,
         client_timestamp: Date.now(),
         server_timestamp: 0,
-        hash: 'MOCK_HASH',
+        hash: eventHash,
         sync_status: 'pending'
       });
     });
@@ -74,15 +83,19 @@ export function useInventory(branchFilter?: string) {
     await db.transaction('rw', db.products, db.pos_events, db.counters, db.settings, async () => {
       const deviceId = await getDeviceId();
       await db.products.delete(id);
+      
+      const payload = { id };
+      const eventHash = await generateEventHash(payload);
+
       await db.pos_events.add({
         event_id: await generateTraceableId('PRD', businessId!, business!.code, deviceId),
         business_id: businessId!,
         staff_id: userType === 'owner' ? 'owner' : (userType || 'unknown'),
         event_type: 'PRODUCT_DELETED',
-        payload: { id },
+        payload,
         client_timestamp: Date.now(),
         server_timestamp: 0,
-        hash: 'MOCK_HASH',
+        hash: eventHash,
         sync_status: 'pending'
       });
     });
@@ -107,6 +120,8 @@ export function useInventory(branchFilter?: string) {
         };
         await db.inventory_ledger.add(ledgerEvent);
 
+        const eventHash = await generateEventHash(ledgerEvent);
+
         await db.pos_events.add({
           event_id: await generateTraceableId('LED', businessId!, business!.code, deviceId),
           business_id: businessId!,
@@ -115,7 +130,7 @@ export function useInventory(branchFilter?: string) {
           payload: ledgerEvent,
           client_timestamp: Date.now(),
           server_timestamp: 0,
-          hash: 'MOCK_HASH',
+          hash: eventHash,
           sync_status: 'pending'
         });
       });
