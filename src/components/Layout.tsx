@@ -354,7 +354,7 @@ function SyncStatus() {
     return (
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--warning)', fontWeight: 700, fontSize: '0.85rem' }}>
         <span style={{ fontSize: '1.2rem', animation: 'spin 2s linear infinite', display: 'inline-block' }}>🟡</span>
-        <span className="desktop-only">Syncing Changes...</span>
+        <span className="desktop-only">Saving to Cloud...</span>
       </div>
     );
   }
@@ -371,7 +371,7 @@ function SyncStatus() {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--success)', fontWeight: 700, fontSize: '0.85rem' }}>
       <span style={{ fontSize: '1.2rem' }}>🟢</span>
-      <span className="desktop-only">{pendingCount > 0 ? `${pendingCount} Items Pending` : 'All Synced'}</span>
+      <span className="desktop-only">{pendingCount > 0 ? `${pendingCount} Items Pending` : 'Cloud Saved'}</span>
       {pendingCount > 0 && <span className="mobile-only">({pendingCount})</span>}
     </div>
   );
@@ -400,7 +400,10 @@ function ClosingFloatModal({ onClose, onConfirm, getExpected }: { onClose: () =>
   return (
     <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999 }}>
       <div className="card modal-responsive" style={{ padding: '32px', maxWidth: '400px' }}>
-        <h2 style={{ fontSize: '1.5rem', fontWeight: 900, marginBottom: '24px', textAlign: 'center' }}>Close Register</h2>
+        <h2 style={{ fontSize: '1.5rem', fontWeight: 900, marginBottom: '8px', textAlign: 'center' }}>Close Register</h2>
+        <p style={{ textAlign: 'center', fontSize: '0.85rem', color: 'var(--text-muted)', marginBottom: '24px' }}>
+          Count your physical cash and type it below. Don't worry if it's slightly off, your manager will review it.
+        </p>
         
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginBottom: '24px' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px', background: '#f8fafc', borderRadius: '12px' }}>

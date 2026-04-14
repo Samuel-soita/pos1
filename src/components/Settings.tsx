@@ -530,6 +530,15 @@ export function Settings() {
                   </button>
                 </div>
               </div>
+              
+              <div style={{ marginTop: '16px', background: 'rgba(59, 130, 246, 0.05)', padding: '12px', borderRadius: '10px', border: '1px solid rgba(59, 130, 246, 0.1)' }}>
+                <p style={{ fontSize: '0.75rem', fontWeight: 800, color: 'var(--primary)', marginBottom: '8px' }}>How to connect your printer:</p>
+                <ol style={{ fontSize: '0.75rem', color: 'var(--text-muted)', margin: 0, paddingLeft: '16px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  <li>Turn on your thermal printer.</li>
+                  <li>Click <strong>Connect Bluetooth</strong> or <strong>USB</strong> above.</li>
+                  <li>A browser popup will appear. Select your printer from the list and click <strong>Pair</strong>.</li>
+                </ol>
+              </div>
             </div>
 
             <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '12px', border: '1px solid var(--border)' }}>

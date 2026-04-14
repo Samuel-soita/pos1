@@ -47,36 +47,36 @@ export function Dashboard({ onTabChange }: { onTabChange: (tab: string) => void 
     },
     { 
       id: 'purchases', 
-      title: 'Purchases', 
-      desc: 'Stock bulk restocking', 
+      title: 'Buy Stock', 
+      desc: 'Buy and restock items', 
       icon: <ShoppingCart size={28} />, 
       gradient: 'card-gradient-success'
     },
     { 
       id: 'suppliers', 
       title: 'Suppliers', 
-      desc: 'Manage your suppliers', 
+      desc: 'Manage your contacts', 
       icon: <Truck size={28} />, 
       gradient: 'card-gradient-rose'
     },
     { 
       id: 'reports', 
-      title: 'Reports', 
-      desc: 'Sales performance & profit metrics', 
+      title: 'Sales & Profit', 
+      desc: 'Total Money In & Out', 
       icon: <BarChart3 size={28} />, 
       gradient: 'card-gradient-success'
     },
     { 
       id: 'staff', 
       title: 'Staff Management', 
-      desc: 'Staff roles, PINs & permissions', 
+      desc: 'Staff roles, PINs & shifts', 
       icon: <Users size={28} />, 
       gradient: 'card-gradient-slate'
     },
     { 
       id: 'expenses', 
-      title: 'Expenses', 
-      desc: 'Track business spending & utilities', 
+      title: 'Shop Costs', 
+      desc: 'Track shop spending', 
       icon: <Receipt size={28} />, 
       gradient: 'card-gradient-rose' 
     },
