@@ -235,6 +235,7 @@ CREATE TABLE IF NOT EXISTS payment_requests (
     mpesa_fee DECIMAL DEFAULT 0,    -- Tracking the convenience fee
     mpesa_code TEXT,                -- Filled after success
     payment_type TEXT NOT NULL,     -- 'activation', 'renewal', 'sale'
+    target_package TEXT,            -- NEW: For package upgrades
     timestamp BIGINT NOT NULL,
     status TEXT NOT NULL DEFAULT 'pending', -- 'pending', 'success', 'failed'
     created_at TIMESTAMPTZ DEFAULT now()
@@ -416,7 +417,9 @@ DROP POLICY IF EXISTS "Strict Tenant Isolation (Mpesa Configs)" ON business_mpes
 CREATE POLICY "Strict Tenant Isolation (Mpesa Configs)" ON business_mpesa_configs FOR ALL USING (business_id = auth.uid());
 
 DROP POLICY IF EXISTS "Strict Tenant Isolation (Payment Requests)" ON payment_requests;
-CREATE POLICY "Strict Tenant Isolation (Payment Requests)" ON payment_requests FOR ALL USING (business_id = auth.uid());
+CREATE POLICY "Strict Tenant Isolation (Payment Requests)" ON payment_requests FOR SELECT USING (business_id = auth.uid());
+REVOKE INSERT, UPDATE, DELETE ON payment_requests FROM authenticated;
+GRANT SELECT ON payment_requests TO authenticated;
 
 DROP POLICY IF EXISTS "Strict Tenant Isolation (Shifts)" ON shifts;
 CREATE POLICY "Strict Tenant Isolation (Shifts)" ON shifts FOR ALL USING (business_id = auth.uid());
@@ -438,6 +441,29 @@ CREATE POLICY "Strict Tenant Isolation (Suppliers)" ON suppliers FOR ALL USING (
 
 -- Prevent overwrite destruction on immutable financial tables for staff
 REVOKE UPDATE, DELETE ON sales FROM authenticated;
+
+-- Prevent Business Subscription Tampering
+CREATE OR REPLACE FUNCTION prevent_subscription_tampering()
+RETURNS trigger AS $$
+BEGIN
+    IF NEW.expiry_date IS DISTINCT FROM OLD.expiry_date
+    OR NEW.status IS DISTINCT FROM OLD.status
+    OR NEW.package_id IS DISTINCT FROM OLD.package_id
+    OR NEW.trial_used IS DISTINCT FROM OLD.trial_used
+    OR NEW.suspended_revenue_count IS DISTINCT FROM OLD.suspended_revenue_count THEN
+        IF current_setting('request.jwt.claim.role', true) = 'authenticated' THEN
+            RAISE EXCEPTION 'Unauthorized subscription modification';
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS protect_business_subscription ON businesses;
+CREATE TRIGGER protect_business_subscription
+BEFORE UPDATE ON businesses
+FOR EACH ROW
+EXECUTE FUNCTION prevent_subscription_tampering();
 
 -- Event-Driven Inventory Ledger
 CREATE TABLE IF NOT EXISTS inventory_ledger (
@@ -483,6 +509,7 @@ BEGIN
         -- 1. Activate the business
         UPDATE businesses
         SET status = 'active',
+            package_id = COALESCE(NEW.target_package, package_id),
             expiry_date = CASE 
                 WHEN expiry_date > v_now_ms 
                 THEN expiry_date + (30 * 24 * 60 * 60 * 1000) -- Add 30 days to existing
@@ -696,3 +723,21 @@ GRANT ALL ON public.provisioning_audit TO authenticated;
 
 GRANT ALL ON public.suppliers TO authenticated;
 GRANT ALL ON public.purchases TO authenticated;
+
+-- ==========================================
+-- 13. Admin Management Views
+-- ==========================================
+-- Provides a clean table inside Supabase to easily see Business Names, IDs, and human-readable expiry dates
+CREATE OR REPLACE VIEW admin_business_management AS
+SELECT 
+    id as business_id,
+    name as business_name,
+    code as business_code,
+    owner_email,
+    telephone,
+    status,
+    package_id,
+    to_timestamp(expiry_date / 1000.0) as expiry_date_human_readable,
+    suspended_revenue_count
+FROM public.businesses
+ORDER BY name ASC;

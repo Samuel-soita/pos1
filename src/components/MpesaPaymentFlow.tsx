@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { db } from '../db/db';
 import { useAuth } from '../hooks/useAuth';
-import { Smartphone, Loader2, CheckCircle2, AlertCircle, RefreshCcw } from 'lucide-react';
+import { Smartphone, Loader2, CheckCircle2, AlertCircle, RefreshCcw, Banknote } from 'lucide-react';
+import { supabase } from '../lib/supabase';
 
 interface MpesaPaymentFlowProps {
   amount: number;
@@ -11,23 +12,21 @@ interface MpesaPaymentFlowProps {
 
 export function MpesaPaymentFlow({ amount, onSuccess, onCancel }: MpesaPaymentFlowProps) {
   const { business } = useAuth();
-  const PLATFORM_FEE = 10; // Fixed fee to cover Daraja API costs
+  const PLATFORM_FEE = 10;
   const totalWithFee = amount + PLATFORM_FEE;
-  // const { status: currentStatus } = useSubscription();
+  
+  const [paymentMode, setPaymentMode] = useState<'selection' | 'stk_push' | 'manual'>('selection');
+  
   const [phoneNumber, setPhoneNumber] = useState(business?.telephone || '');
   const [isProcessing, setIsProcessing] = useState(false);
-  // const [checkoutId, setCheckoutId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [pollingStatus, setPollingStatus] = useState<'idle' | 'waiting' | 'verifying' | 'success' | 'failed'>('idle');
 
-  // Poll for the business status changes in the local DB (synced from cloud)
   useEffect(() => {
     if (pollingStatus !== 'waiting' && pollingStatus !== 'verifying') return;
 
     const interval = setInterval(async () => {
       if (!business?.id) return;
-      
-      // We check the local 'businesses' table which is updated by useSync
       const updatedBiz = await db.businesses.get(business.id);
       if (updatedBiz?.status === 'active' || updatedBiz?.status === 'trial') {
         setPollingStatus('success');
@@ -36,7 +35,6 @@ export function MpesaPaymentFlow({ amount, onSuccess, onCancel }: MpesaPaymentFl
       }
     }, 3000);
 
-    // Timeout after 2 minutes
     const timeout = setTimeout(() => {
       if (pollingStatus === 'waiting' || pollingStatus === 'verifying') {
         setError("Payment verification timed out. If you paid, it will reflect shortly.");
@@ -50,7 +48,6 @@ export function MpesaPaymentFlow({ amount, onSuccess, onCancel }: MpesaPaymentFl
     };
   }, [pollingStatus, business?.id, onSuccess]);
 
-  /*
   const handleInitiatePayment = async () => {
     if (!business || !phoneNumber) return;
     
@@ -59,14 +56,11 @@ export function MpesaPaymentFlow({ amount, onSuccess, onCancel }: MpesaPaymentFl
     setPollingStatus('waiting');
 
     try {
-      const PLATFORM_FEE = 10;
-      const finalAmount = Math.round(Number(amount) + PLATFORM_FEE);
-
       const { data, error: funcError } = await supabase.functions.invoke('mpesa-stk-push', {
         body: {
           businessId: business.id,
           phone: phoneNumber,
-          amount: finalAmount,
+          amount: totalWithFee,
           paymentType: business.trialUsed ? 'renewal' : 'activation'
         }
       });
@@ -74,15 +68,12 @@ export function MpesaPaymentFlow({ amount, onSuccess, onCancel }: MpesaPaymentFl
       if (funcError) throw funcError;
       if (data.error) throw new Error(data.error);
 
-      // setCheckoutId(data.checkoutRequestId);
-      // Stay in 'waiting' state while we poll for DB changes
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to initiate M-Pesa payment');
       setPollingStatus('failed');
       setIsProcessing(false);
     }
   };
-  */
 
   if (pollingStatus === 'success') {
     return (
@@ -94,6 +85,88 @@ export function MpesaPaymentFlow({ amount, onSuccess, onCancel }: MpesaPaymentFl
     );
   }
 
+  // selection screen
+  if (paymentMode === 'selection') {
+     return (
+       <div style={{ padding: '24px', background: 'white', borderRadius: '24px', border: '1px solid var(--border)' }}>
+         <h3 style={{ fontWeight: 800, fontSize: '1.2rem', marginBottom: '8px' }}>Choose Payment Method</h3>
+         <p style={{ color: 'var(--text-muted)', marginBottom: '24px' }}>How would you like to pay KES {totalWithFee.toLocaleString()}?</p>
+         
+         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+           <button 
+             className="btn-primary" 
+             onClick={() => setPaymentMode('stk_push')}
+             style={{ justifyContent: 'flex-start', padding: '16px', gap: '16px', height: 'auto' }}
+           >
+             <Smartphone size={24} />
+             <div style={{ textAlign: 'left' }}>
+               <div style={{ fontWeight: 800, fontSize: '1.1rem' }}>M-Pesa Express (STK Push)</div>
+               <div style={{ fontWeight: 400, fontSize: '0.85rem', opacity: 0.9 }}>Get a prompt directly on your phone</div>
+             </div>
+           </button>
+
+           <button 
+             className="btn-secondary" 
+             onClick={() => setPaymentMode('manual')}
+             style={{ justifyContent: 'flex-start', padding: '16px', gap: '16px', height: 'auto', background: '#f8fafc' }}
+           >
+             <Banknote size={24} color="var(--primary)" />
+             <div style={{ textAlign: 'left' }}>
+               <div style={{ fontWeight: 800, fontSize: '1.1rem', color: 'var(--text)' }}>Manual Payment (Paybill)</div>
+               <div style={{ fontWeight: 400, fontSize: '0.85rem', color: 'var(--text-muted)' }}>Send money directly and notify us</div>
+             </div>
+           </button>
+
+           <button className="btn-secondary" onClick={onCancel} style={{ marginTop: '12px' }}>
+             Cancel
+           </button>
+         </div>
+       </div>
+     );
+  }
+
+  if (paymentMode === 'manual') {
+    return (
+      <div style={{ padding: '24px', background: 'white', borderRadius: '24px', border: '1px solid var(--border)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '24px' }}>
+          <div style={{ background: '#22c55e', color: 'white', padding: '8px', borderRadius: '10px' }}>
+            <Banknote size={20} />
+          </div>
+          <div>
+            <h3 style={{ fontWeight: 800, fontSize: '1.1rem' }}>Manual Payment Activation</h3>
+            <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Pay via Paybill / Till Number</p>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+          <div style={{ background: '#f0fdf4', padding: '20px', borderRadius: '16px', border: '1px solid #dcfce7', textAlign: 'center' }}>
+            <p style={{ fontSize: '0.85rem', fontWeight: 700, color: '#166534', textTransform: 'uppercase', marginBottom: '8px' }}>Amount Due</p>
+            <p style={{ fontSize: '2rem', fontWeight: 900, color: '#15803d', marginBottom: '12px' }}>KES {totalWithFee.toLocaleString()}</p>
+            <p style={{ color: '#166534', fontSize: '0.9rem' }}>Please send this exact amount via M-Pesa to:</p>
+            <div style={{ marginTop: '12px', padding: '12px', background: 'white', borderRadius: '12px', display: 'inline-block', boxShadow: '0 4px 6px -1px rgba(0,0,0,0.05)' }}>
+               <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Send Money to</p>
+               <p style={{ fontSize: '1.5rem', fontWeight: 900, letterSpacing: '2px', color: 'var(--text)' }}>0768640343</p>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', gap: '12px', padding: '16px', background: '#eff6ff', borderRadius: '12px', border: '1px solid #bfdbfe' }}>
+            <AlertCircle size={24} color="#1d4ed8" style={{ flexShrink: 0 }} />
+            <p style={{ fontSize: '0.9rem', color: '#1e3a8a', lineHeight: 1.5 }}>
+              <strong>After making the payment:</strong><br/> 
+              Send your M-Pesa confirmation message to our support line at <strong>0768640343</strong> via WhatsApp. Your pos will be activated immediately upon verification.
+            </p>
+          </div>
+
+          <div style={{ display: 'flex', gap: '12px' }}>
+            <button className="btn-secondary" onClick={() => setPaymentMode('selection')} style={{ flex: 1 }}>Back</button>
+            <button className="btn-secondary" onClick={onCancel} style={{ flex: 1 }}>Close</button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // STK Push flow
   return (
     <div style={{ padding: '24px', background: 'white', borderRadius: '24px', border: '1px solid var(--border)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '24px' }}>
@@ -101,7 +174,7 @@ export function MpesaPaymentFlow({ amount, onSuccess, onCancel }: MpesaPaymentFl
           <Smartphone size={20} />
         </div>
         <div>
-          <h3 style={{ fontWeight: 800, fontSize: '1.1rem' }}>M-Pesa Express Activation</h3>
+          <h3 style={{ fontWeight: 800, fontSize: '1.1rem' }}>M-Pesa Express</h3>
           <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Secure STK Push Payment</p>
         </div>
       </div>
@@ -138,17 +211,18 @@ export function MpesaPaymentFlow({ amount, onSuccess, onCancel }: MpesaPaymentFl
           <div style={{ display: 'flex', gap: '12px' }}>
             <button 
               className="btn-primary" 
-              style={{ flex: 1, opacity: 0.6 }}
-              disabled
+              style={{ flex: 1 }}
+              onClick={handleInitiatePayment}
+              disabled={isProcessing || !phoneNumber}
             >
-              Pay KES {totalWithFee.toLocaleString()} (Coming Soon)
+              Pay KES {totalWithFee.toLocaleString()}
             </button>
             <button 
               className="btn-secondary" 
-              onClick={onCancel}
+              onClick={() => setPaymentMode('selection')}
               disabled={isProcessing}
             >
-              Cancel
+              Back
             </button>
           </div>
         </div>

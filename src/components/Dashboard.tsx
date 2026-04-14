@@ -47,7 +47,7 @@ export function Dashboard({ onTabChange }: { onTabChange: (tab: string) => void 
     },
     { 
       id: 'purchases', 
-      title: 'Buy Stock', 
+      title: 'Purchases', 
       desc: 'Buy and restock items', 
       icon: <ShoppingCart size={28} />, 
       gradient: 'card-gradient-success'
@@ -75,7 +75,7 @@ export function Dashboard({ onTabChange }: { onTabChange: (tab: string) => void 
     },
     { 
       id: 'expenses', 
-      title: 'Shop Costs', 
+      title: 'Expenses', 
       desc: 'Track shop spending', 
       icon: <Receipt size={28} />, 
       gradient: 'card-gradient-rose' 

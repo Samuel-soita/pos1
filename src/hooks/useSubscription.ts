@@ -49,12 +49,18 @@ export function useSubscription() {
     return () => clearInterval(timer);
   }, [business?.id, lastSeenTime]);
 
+  const lastSyncTimeStr = localStorage.getItem(`entitlement_${business?.id}_last_sync`);
+  const lastSyncTime = lastSyncTimeStr ? parseInt(lastSyncTimeStr, 10) : 0;
+  const isLimitedMode = lastSyncTime === 0 || (now - lastSyncTime > 7 * 24 * 60 * 60 * 1000);
+
   const statusInfo = useMemo(() => {
-    if (!business) return { status: 'active' as SubscriptionStatus, daysLeft: 0, message: '', isLocked: false, isTrial: false, limitReached: false, trialUsed: false };
+    if (!business) return { status: 'active' as SubscriptionStatus, daysLeft: 0, message: '', isLocked: false, isTrial: false, limitReached: false, trialUsed: false, isLimitedMode: false };
 
     const { expiryDate, status: businessStatus, suspendedRevenueCount = 0, trialUsed = false } = business;
     const threeDaysMs = 3 * 24 * 60 * 60 * 1000;
     const isTrial = businessStatus === 'trial';
+
+    const limitCondition = isLimitedMode ? suspendedRevenueCount >= 20 : suspendedRevenueCount >= 5;
 
     // 1. Pending Payment Flow (Trust-First)
     if (businessStatus === 'pending_payment' || businessStatus === 'pending_verification') {
@@ -63,10 +69,12 @@ export function useSubscription() {
         message: businessStatus === 'pending_verification' 
           ? 'Payment under review (1–5 mins)...' 
           : 'Payment detected, confirming...',
-        isLocked: false,
+        isLocked: limitCondition,
         daysLeft: 0,
         isTrial: false,
-        limitReached: false
+        limitReached: limitCondition,
+        trialUsed,
+        isLimitedMode
       };
     }
 
@@ -77,11 +85,14 @@ export function useSubscription() {
       return {
         status: isTrial ? 'trial' : 'active' as SubscriptionStatus,
         daysLeft: days,
-        message: isTrial ? `Trial ends in ${days} days` : `Subscription active: ${days} days left`,
-        isLocked: false,
+        message: isLimitedMode
+            ? `Limited Mode: Connect to internet. ${20 - suspendedRevenueCount} offline sales left`
+            : (isTrial ? `Trial ends in ${days} days` : `Subscription active: ${days} days left`),
+        isLocked: isLimitedMode && limitCondition,
         isTrial,
-        limitReached: false,
-        trialUsed
+        limitReached: isLimitedMode && limitCondition,
+        trialUsed,
+        isLimitedMode
       };
     }
 
@@ -92,25 +103,30 @@ export function useSubscription() {
       return {
         status: 'grace' as SubscriptionStatus,
         daysLeft: days,
-        message: `Grace period: ${days} days remaining`,
-        isLocked: false,
+        message: isLimitedMode
+          ? `Limited Mode: Connect to internet. ${20 - suspendedRevenueCount} offline sales left`
+          : `Grace period: ${days} days remaining`,
+        isLocked: isLimitedMode && limitCondition,
         isTrial: false,
-        limitReached: false
+        limitReached: isLimitedMode && limitCondition,
+        trialUsed,
+        isLimitedMode
       };
     }
 
-    // 4. Suspended Flow (Smart Lock - 5 Sales)
-    const limitReached = suspendedRevenueCount >= 5;
+    // 4. Suspended Flow
+    const limitReached = limitCondition;
     return {
       status: 'suspended' as SubscriptionStatus,
       daysLeft: 0,
-      message: limitReached ? 'Emergency sales limit reached' : `Suspended: ${5 - suspendedRevenueCount} emergency sales left`,
+      message: limitReached ? 'Emergency sales limit reached. Sync required.' : `Suspended: ${isLimitedMode ? 20 - suspendedRevenueCount : 5 - suspendedRevenueCount} emergency sales left`,
       isLocked: limitReached,
       isTrial: false,
       limitReached,
-      trialUsed
+      trialUsed,
+      isLimitedMode
     };
-  }, [business, now]);
+  }, [business, now, isLimitedMode]);
 
   const packages = {
     hustler: { 

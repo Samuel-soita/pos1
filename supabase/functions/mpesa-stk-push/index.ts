@@ -19,14 +19,14 @@ serve(async (req) => {
     interface ActivationRequest {
       businessId: string;
       phone: string;
-      amount: number | string;
+      targetPackage?: string;
       paymentType?: string;
     }
 
-    const { businessId, phone, amount, paymentType } = await req.json() as ActivationRequest;
+    const { businessId, phone, targetPackage, paymentType } = await req.json() as ActivationRequest;
 
-    if (!businessId || !phone || !amount) {
-      throw new Error("Missing required fields: businessId, phone, amount");
+    if (!businessId || !phone) {
+      throw new Error("Missing required fields: businessId, phone");
     }
 
     if (typeof phone !== "string") {
@@ -49,6 +49,65 @@ serve(async (req) => {
     }
 
     console.log(`[Activation Push] Formatted Phone: ${formattedPhone} from original: ${phone}`);
+
+    // -- SERVER-SIDE ENFORCEMENT OF BILLING --
+    const { data: business, error: bizError } = await supabaseClient
+      .from('businesses')
+      .select('package_id, enabled_features, custom_feature_count')
+      .eq('id', businessId)
+      .single();
+
+    if (bizError || !business) throw new Error("Business not found for billing.");
+
+    const { count: staffCount } = await supabaseClient
+      .from('staff')
+      .select('id', { count: 'exact', head: true })
+      .eq('business_id', businessId)
+      .eq('status', 'active');
+
+    const packages: Record<string, number> = {
+      hustler: 600,
+      growth: 1500,
+      max: 3500,
+      custom: 0
+    };
+
+    const activeStaff = staffCount || 0;
+    const staffCost = activeStaff * 150;
+
+    // Modular & Custom Costs
+    const MODULAR_PRICES: Record<string, number> = {
+      inventory_alerts: 200,
+      branch_management: 500,
+      shift_tracking: 300,
+      advanced_analytics: 600,
+      excel_exports: 400,
+      receipt_customization: 200
+    };
+    
+    const enabledFeatures = business.enabled_features || [];
+    const modularCost = enabledFeatures.reduce((acc: number, feat: string) => {
+      return acc + (MODULAR_PRICES[feat] || 0);
+    }, 0);
+    
+    const customPrice = (business.custom_feature_count || 0) * 200;
+    const extraCosts = staffCost + modularCost + customPrice;
+
+    const selectedPackage = targetPackage || business.package_id || 'hustler';
+    const basePrice = packages[selectedPackage] || 600;
+
+    let calculatedAmount = basePrice + extraCosts;
+
+    if (targetPackage && targetPackage !== business.package_id) {
+        const currentPrice = packages[business.package_id] || 600;
+        let diff = basePrice - currentPrice;
+        if (diff < 0) diff = 0; // if downgrade, don't refund, charge full new cycle OR just the extras
+        // For simplicity, if they upgrade just charge difference + extra costs for the new cycle
+        calculatedAmount = diff + extraCosts; 
+        if (calculatedAmount <= 0) calculatedAmount = basePrice + extraCosts;
+    }
+
+    if (calculatedAmount <= 0) throw new Error("Calculated amount is invalid.");
 
     // 1. Get Daraja Credentials from Environment
     const consumerKey = Deno.env.get("MPESA_CONSUMER_KEY");
@@ -78,7 +137,7 @@ serve(async (req) => {
     const password = btoa(`${shortCode}${passkey}${timestamp}`);
 
     const PLATFORM_FEE = 10;
-    const finalAmount = Math.round(Number(amount) + PLATFORM_FEE);
+    const finalAmount = Math.round(calculatedAmount + PLATFORM_FEE);
 
     const stkBody = {
       BusinessShortCode: shortCode,
@@ -118,8 +177,9 @@ serve(async (req) => {
         business_id: businessId,
         checkout_request_id: stkData.CheckoutRequestID,
         phone_number: formattedPhone,
-        amount: Number(amount) || 0,
+        amount: calculatedAmount,
         payment_type: paymentType || "activation",
+        target_package: targetPackage,
         status: "pending",
         timestamp: Date.now()
       });
