@@ -181,8 +181,8 @@ export function AuthScreen() {
                   <input 
                     required 
                     type="text" 
-                    maxLength={4}
-                    placeholder="0001"
+                    maxLength={8}
+                    placeholder="ABC-123"
                     value={businessCode} 
                     onChange={e => setBusinessCode(e.target.value)} 
                   />
