@@ -46,11 +46,18 @@ export function Dashboard({ onTabChange }: { onTabChange: (tab: string) => void 
       badgeColor: lowStock.length > 0 ? 'var(--danger)' : 'var(--success)'
     },
     { 
-      id: 'procurement', 
-      title: 'Suppliers and Purchases', 
-      desc: 'Suppliers & bulk restocking', 
-      icon: <Truck size={28} />, 
+      id: 'purchases', 
+      title: 'Purchases', 
+      desc: 'Stock bulk restocking', 
+      icon: <ShoppingCart size={28} />, 
       gradient: 'card-gradient-success'
+    },
+    { 
+      id: 'suppliers', 
+      title: 'Suppliers', 
+      desc: 'Manage your suppliers', 
+      icon: <Truck size={28} />, 
+      gradient: 'card-gradient-rose'
     },
     { 
       id: 'reports', 
@@ -85,7 +92,8 @@ export function Dashboard({ onTabChange }: { onTabChange: (tab: string) => void 
   const handleFeatureClick = (item: FeatureItem) => {
     // Dynamic Permission Check:
     // If user is staff, check if the business has explicitly disabled this tab.
-    const isRestricted = userType === 'staff' && business?.staffPermissions?.[item.id] === false;
+    const permissionKey = ['purchases', 'suppliers'].includes(item.id) ? 'procurement' : item.id;
+    const isRestricted = userType === 'staff' && business?.staffPermissions?.[permissionKey] === false;
 
     if (isRestricted) {
       requestAuth(() => onTabChange(item.id));
@@ -105,7 +113,8 @@ export function Dashboard({ onTabChange }: { onTabChange: (tab: string) => void 
       <section style={{ padding: '0 20px', width: '100%' }}>
         <div className="hub-grid">
           {features.map((item) => {
-            const isLocked = userType === 'staff' && business?.staffPermissions?.[item.id] === false;
+            const permissionKey = ['purchases', 'suppliers'].includes(item.id) ? 'procurement' : item.id;
+            const isLocked = userType === 'staff' && business?.staffPermissions?.[permissionKey] === false;
             
             return (
                 <div 

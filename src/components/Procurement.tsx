@@ -8,8 +8,8 @@ import {
   X, MapPin
 } from 'lucide-react';
 
-export function Procurement() {
-  const [activeView, setActiveView] = useState<'purchases' | 'suppliers'>('purchases');
+export function Procurement({ initialView = 'purchases' }: { initialView?: 'purchases' | 'suppliers' }) {
+  const [activeView] = useState<'purchases' | 'suppliers'>(initialView);
   const { businessId, business } = useAuth();
   
   const suppliers = useLiveQuery(() => 
@@ -121,24 +121,12 @@ export function Procurement() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>
       <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
-          <h1 style={{ fontSize: '2rem', fontWeight: 900, marginBottom: '8px' }}>Suppliers and Purchases</h1>
-          <p style={{ color: 'var(--text-muted)', fontWeight: 600 }}>Manage suppliers and stock restocking</p>
-        </div>
-        <div style={{ display: 'flex', gap: '12px', background: '#f1f5f9', padding: '6px', borderRadius: '14px' }}>
-          <button 
-            className={activeView === 'purchases' ? 'btn-primary' : 'btn-ghost'}
-            onClick={() => setActiveView('purchases')}
-            style={{ borderRadius: '10px' }}
-          >
-            Purchases
-          </button>
-          <button 
-            className={activeView === 'suppliers' ? 'btn-primary' : 'btn-ghost'}
-            onClick={() => setActiveView('suppliers')}
-            style={{ borderRadius: '10px' }}
-          >
-            Suppliers
-          </button>
+          <h1 style={{ fontSize: '2rem', fontWeight: 900, marginBottom: '8px' }}>
+            {activeView === 'purchases' ? 'Purchases & Restocking' : 'Supplier Registry'}
+          </h1>
+          <p style={{ color: 'var(--text-muted)', fontWeight: 600 }}>
+            {activeView === 'purchases' ? 'Manage your stock restocking orders' : 'Manage your supplier contacts'}
+          </p>
         </div>
       </header>
 

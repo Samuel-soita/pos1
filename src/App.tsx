@@ -130,8 +130,10 @@ function App() {
         return <Sales />;
       case 'inventory':
         return <Inventory />;
-      case 'procurement':
-        return <Procurement />;
+      case 'suppliers':
+        return <Procurement key="suppliers" initialView="suppliers" />;
+      case 'purchases':
+        return <Procurement key="purchases" initialView="purchases" />;
       case 'staff':
         return <StaffManagement />;
       case 'history':
