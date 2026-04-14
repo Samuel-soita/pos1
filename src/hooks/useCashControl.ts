@@ -126,11 +126,67 @@ export function useCashControl() {
     });
   };
 
+  const getZReportData = async () => {
+    if (!currentLog || !businessId) return null;
+
+    const todayStart = new Date().setHours(0, 0, 0, 0);
+    const todayEnd = new Date().setHours(23, 59, 59, 999);
+
+    const todaySales = await db.sales
+      .where('timestamp')
+      .between(todayStart, todayEnd)
+      .filter(s => s.branchId === currentLog.branchId && s.status !== 'voided')
+      .toArray();
+
+    const todayExpenses = await db.expenses
+      .where('timestamp')
+      .between(todayStart, todayEnd)
+      .filter(e => e.status !== 'rejected' && e.branchId === currentLog.branchId)
+      .toArray();
+
+    const cashSales = todaySales
+      .filter(s => s.paymentMethod === 'Cash')
+      .reduce((sum, s) => sum + s.total, 0);
+    
+    // Handle Split Payments for Cash portion
+    const splitCash = todaySales
+      .filter(s => s.paymentMethod === 'Split')
+      .reduce((sum, s) => {
+        const cashPart = s.splitPayments?.find(p => p.method === 'Cash')?.amount || 0;
+        return sum + cashPart;
+      }, 0);
+
+    const mpesaSales = todaySales
+      .filter(s => s.paymentMethod === 'M-Pesa')
+      .reduce((sum, s) => sum + s.total, 0) +
+      todaySales
+      .filter(s => s.paymentMethod === 'Split')
+      .reduce((sum, s) => {
+        const mpesaPart = s.splitPayments?.find(p => p.method === 'M-Pesa')?.amount || 0;
+        return sum + mpesaPart;
+      }, 0);
+
+    const expensesTotal = todayExpenses.reduce((sum, e) => sum + e.amount, 0);
+    const totalCashCollected = cashSales + splitCash;
+    const expectedCashInDrawer = currentLog.openingFloat + totalCashCollected - expensesTotal;
+
+    return {
+      openingFloat: currentLog.openingFloat,
+      cashSales: totalCashCollected,
+      mpesaSales,
+      expenses: expensesTotal,
+      expectedCash: expectedCashInDrawer,
+      salesCount: todaySales.length,
+      expensesCount: todayExpenses.length
+    };
+  };
+
   return {
     currentLog,
     isRegisterOpen: currentLog?.status === 'open',
     openRegister,
     closeRegister,
-    getExpectedCash
+    getExpectedCash,
+    getZReportData
   };
 }

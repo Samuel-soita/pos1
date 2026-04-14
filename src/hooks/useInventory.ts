@@ -3,6 +3,7 @@ import { db, type Product } from '../db/db';
 import { generateTraceableId, getDeviceId } from '../utils/idUtils';
 import { generateEventHash } from '../utils/hashUtils';
 import { useAuth } from './useAuth';
+import { v4 as uuidv4 } from 'uuid';
 
 export function useInventory(branchFilter?: string) {
   const { businessId, business, branchId, userType } = useAuth();
@@ -54,6 +55,47 @@ export function useInventory(branchFilter?: string) {
         hash: eventHash,
         sync_status: 'pending'
       });
+    });
+  };
+
+  const bulkAddProducts = async (items: Array<Partial<Product>>) => {
+    if (!businessId || !business) return;
+
+    await db.transaction('rw', [db.products, db.pos_events, db.counters, db.settings], async () => {
+      const deviceId = await getDeviceId();
+      const now = Date.now();
+
+      for (const item of items) {
+        const id = uuidv4();
+        const payload: Product = {
+          id,
+          businessId,
+          name: item.name || 'Unnamed Product',
+          price: item.price || 0,
+          costPrice: item.costPrice || 0,
+          quantity: item.quantity || 0,
+          lowStockThreshold: item.lowStockThreshold || 5,
+          category: item.category || 'General',
+          barcode: item.barcode || '',
+          updatedAt: now,
+          branchId: branchId || undefined
+        };
+
+        await db.products.add(payload);
+
+        const eventHash = await generateEventHash(payload);
+        await db.pos_events.add({
+          event_id: await generateTraceableId('PRD', businessId, business.code, deviceId),
+          business_id: businessId,
+          staff_id: userType === 'owner' ? 'owner' : (userType || 'unknown'),
+          event_type: 'PRODUCT_CREATED',
+          payload,
+          client_timestamp: now,
+          server_timestamp: 0,
+          hash: eventHash,
+          sync_status: 'pending'
+        });
+      }
     });
   };
 
@@ -137,6 +179,48 @@ export function useInventory(branchFilter?: string) {
     }
   };
 
+  const auditProduct = async (id: string, physicalCount: number) => {
+    const product = await db.products.get(id);
+    if (!product || !businessId || !business) return;
+
+    const variance = physicalCount - product.quantity;
+    if (variance === 0) return;
+
+    await db.transaction('rw', [db.products, db.pos_events, db.inventory_ledger, db.counters, db.settings], async () => {
+      const deviceId = await getDeviceId();
+      const now = Date.now();
+
+      // 1. Update Snapshot
+      await db.products.update(id, { quantity: physicalCount, updatedAt: now });
+
+      // 2. Log to Ledger
+      const ledgerEvent = {
+        id: await generateTraceableId('INV', businessId, business.code, deviceId),
+        businessId,
+        productId: id,
+        action: 'AUDIT' as const,
+        quantity: variance, // Negative means lost, Positive means found
+        recordedAt: now,
+        syncStatus: 'pending' as const
+      };
+      await db.inventory_ledger.add(ledgerEvent);
+
+      // 3. Log to Events (Sync)
+      const eventHash = await generateEventHash(ledgerEvent);
+      await db.pos_events.add({
+        event_id: await generateTraceableId('LED', businessId, business.code, deviceId),
+        business_id: businessId,
+        staff_id: userType === 'owner' ? 'owner' : (userType || 'unknown'),
+        event_type: 'INVENTORY_AUDITED',
+        payload: { productId: id, physicalCount, variance, previousCount: product.quantity },
+        client_timestamp: now,
+        server_timestamp: 0,
+        hash: eventHash,
+        sync_status: 'pending'
+      });
+    });
+  };
+
   const getLowStockProducts = () => {
     return products.filter(p => p.quantity <= p.lowStockThreshold);
   };
@@ -144,9 +228,11 @@ export function useInventory(branchFilter?: string) {
   return {
     products,
     addProduct,
+    bulkAddProducts,
     updateProduct,
     deleteProduct,
     restockProduct,
+    auditProduct,
     getLowStockProducts,
   };
 }

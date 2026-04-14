@@ -1,4 +1,4 @@
-import { useState, useEffect, createContext, useContext, type ReactNode } from 'react';
+import { useState, useEffect } from 'react';
 import { db } from '../db/db';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useSync } from '../hooks/useSync';
@@ -12,24 +12,7 @@ import {
   X, LogOut, Lock, 
   Sparkles, Home, Wallet, ArrowLeft
 } from 'lucide-react';
-
-interface LayoutContextType {
-  requestAuth: (callback: () => void) => void;
-}
-
-const LayoutContext = createContext<LayoutContextType | undefined>(undefined);
-
-export function useLayout() {
-  const context = useContext(LayoutContext);
-  if (!context) throw new Error('useLayout must be used within Layout');
-  return context;
-}
-
-interface LayoutProps {
-  children: ReactNode;
-  activeTab: string;
-  setActiveTab: (tab: string) => void;
-}
+import { LayoutContext, type LayoutProps } from '../context/LayoutContext';
 
 const RESTRICTED_TABS = ['dashboard', 'inventory', 'reports', 'settings', 'staff', 'procurement'];
 

@@ -79,27 +79,41 @@ function App() {
     requestPersistentStorage();
   }, []);
 
-  // Idle Background Prefetching: 
-  // Keeps initial boot fast (lazy loading), but silently downloads tabs in the background 
-  // so that when the user clicks 'Sales' or 'Inventory', it loads instantly with zero jank.
+  // Intelligent Staggered Prefetching:
+  // We prioritize the core register functions (Sales/Inventory) first to ensure 
+  // the user can start selling immediately, then load secondary tools.
   useEffect(() => {
     if (businessId) {
-      const timer = setTimeout(() => {
+      // 1. High Priority: Core POS (Sales & Inventory)
+      const timer1 = setTimeout(() => {
         import('./components/Sales');
         import('./components/Inventory');
-        import('./components/Settings');
-        import('./components/Reports');
+      }, 500); 
+
+      // 2. Medium Priority: Daily Ops (Expenses, History, Procurement)
+      const timer2 = setTimeout(() => {
         import('./components/Expenses');
-        import('./components/StaffManagement');
         import('./components/History');
         import('./components/Procurement');
-      }, 1500); // 1.5 seconds after boot (when the network is quiet)
-      return () => clearTimeout(timer);
+      }, 2500);
+
+      // 3. Low Priority: Admin & Reports (Heavy or less urgent)
+      const timer3 = setTimeout(() => {
+        import('./components/Reports');
+        import('./components/Settings');
+        import('./components/StaffManagement');
+      }, 5000);
+
+      return () => {
+        clearTimeout(timer1);
+        clearTimeout(timer2);
+        clearTimeout(timer3);
+      };
     }
   }, [businessId]);
 
   if (isLoading) {
-    return <div style={{ display: 'flex', height: '100vh', alignItems: 'center', justifyContent: 'center' }}>Loading...</div>;
+    return <LoadingSkeleton />;
   }
 
   if (!businessId) {
@@ -163,7 +177,9 @@ function App() {
     <>
       <Layout activeTab={activeTab} setActiveTab={setActiveTab}>
         <Suspense fallback={<LoadingSkeleton />}>
-          {renderContent()}
+          <div key={activeTab} className="view-transition" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
+            {renderContent()}
+          </div>
         </Suspense>
       </Layout>
       <InstallBanner />

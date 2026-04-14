@@ -1,16 +1,21 @@
 import { useState } from 'react';
 import { type Sale } from '../db/db';
-import { Search, Printer, FileText, TrendingUp, Banknote, Calendar, Receipt } from 'lucide-react';
+import { Search, Printer, FileText, TrendingUp, Banknote, Calendar, Receipt, AlertCircle, RotateCcw } from 'lucide-react';
 import { db } from '../db/db';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useAuth } from '../hooks/useAuth';
+import { useSales } from '../hooks/useSales';
 
 export function History() {
   const { business, userType } = useAuth();
+  const { voidSale } = useSales();
   const isOwner = userType === 'owner';
   
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedSale, setSelectedSale] = useState<Sale | null>(null);
+  const [showVoidConfirm, setShowVoidConfirm] = useState(false);
+  const [voidReason, setVoidReason] = useState('');
+  const [isVoiding, setIsVoiding] = useState(false);
   const [dateFilter, setDateFilter] = useState(new Date().toISOString().split('T')[0]);
   const [periodFilter, setPeriodFilter] = useState('Today');
   const limit = 50;
@@ -53,9 +58,10 @@ export function History() {
     return results;
   }, [periodFilter, dateFilter, searchTerm, limit, business]) || [];
 
-  const totalFilteredSales = sales.reduce((sum, s) => sum + s.total, 0);
-  const totalFilteredProfit = sales.reduce((sum, s) => sum + (s.totalProfit || 0), 0);
-  const totalFilteredTax = sales.reduce((sum, s) => sum + (s.taxAmount || 0), 0);
+  const activeSales = sales.filter(s => s.status !== 'voided');
+  const totalFilteredSales = activeSales.reduce((sum, s) => sum + s.total, 0);
+  const totalFilteredProfit = activeSales.reduce((sum, s) => sum + (s.totalProfit || 0), 0);
+  const totalFilteredTax = activeSales.reduce((sum, s) => sum + (s.taxAmount || 0), 0);
 
   const handlePrint = () => {
     window.print();
@@ -170,7 +176,12 @@ export function History() {
                     {sale.paymentMethod === 'Split' ? 'Multi-Payment' : (sale.paymentMethod || 'Cash')}
                   </span>
                 </td>
-                <td style={{ padding: '16px 24px', fontWeight: 800 }} data-label="Amount">KES {sale.total.toLocaleString()}</td>
+                <td style={{ padding: '16px 24px', fontWeight: 800, textDecoration: sale.status === 'voided' ? 'line-through' : 'none', color: sale.status === 'voided' ? 'var(--text-muted)' : 'inherit' }} data-label="Amount">
+                  KES {sale.total.toLocaleString()}
+                  {sale.status === 'voided' && (
+                    <span style={{ display: 'block', fontSize: '0.65rem', color: 'var(--danger)', fontWeight: 800, textDecoration: 'none' }}>VOIDED</span>
+                  )}
+                </td>
                 <td style={{ padding: '16px 24px', textAlign: 'right' }} data-label="Actions">
                   <button onClick={() => setSelectedSale(sale)} className="btn-secondary" style={{ padding: '8px 12px', minHeight: '40px', width: '100%', justifyContent: 'center' }}>
                     <FileText size={16} /> View Receipt
@@ -258,12 +269,63 @@ export function History() {
               </div>
             </div>
 
-            <div style={{ padding: '20px', borderTop: '1px solid var(--border)', display: 'flex', gap: '12px' }} className="no-print">
-              <button onClick={handlePrint} className="btn-primary" style={{ flex: 1 }}>
-                <Printer size={20} /> Print Receipt
-              </button>
-              <button onClick={() => setSelectedSale(null)} className="btn-secondary">Close</button>
-            </div>
+              <div style={{ padding: '20px', borderTop: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: '12px' }} className="no-print">
+                <div style={{ display: 'flex', gap: '12px' }}>
+                  <button onClick={handlePrint} className="btn-primary" style={{ flex: 1 }}>
+                    <Printer size={20} /> Print Receipt
+                  </button>
+                  {isOwner && selectedSale.status !== 'voided' && (
+                    <button 
+                      onClick={() => setShowVoidConfirm(true)} 
+                      className="btn-secondary" 
+                      style={{ color: 'var(--danger)', borderColor: 'var(--danger)' }}
+                    >
+                      <RotateCcw size={20} /> Void
+                    </button>
+                  )}
+                </div>
+
+                {showVoidConfirm && (
+                  <div className="fade-in" style={{ background: '#fff1f2', padding: '16px', borderRadius: '12px', border: '1px solid #fecaca' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#991b1b', marginBottom: '12px' }}>
+                      <AlertCircle size={18} />
+                      <span style={{ fontWeight: 800, fontSize: '0.85rem' }}>Reason for Voiding?</span>
+                    </div>
+                    <input 
+                      autoFocus
+                      placeholder="e.g. Wrong items / Customer cancelled"
+                      value={voidReason}
+                      onChange={e => setVoidReason(e.target.value)}
+                      style={{ background: 'white', marginBottom: '12px' }}
+                    />
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <button 
+                        disabled={!voidReason || isVoiding}
+                        onClick={async () => {
+                          setIsVoiding(true);
+                          await voidSale(selectedSale.id, voidReason);
+                          setIsVoiding(false);
+                          setShowVoidConfirm(false);
+                          setSelectedSale(null);
+                        }}
+                        className="btn-primary" 
+                        style={{ background: 'var(--danger)', flex: 1, fontSize: '0.8rem' }}
+                      >
+                        {isVoiding ? 'Voiding...' : 'Confirm Void'}
+                      </button>
+                      <button 
+                        onClick={() => setShowVoidConfirm(false)}
+                        className="btn-secondary" 
+                        style={{ flex: 1, fontSize: '0.8rem' }}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                <button onClick={() => { setSelectedSale(null); setShowVoidConfirm(false); }} className="btn-secondary">Close</button>
+              </div>
           </div>
         </div>
       )}

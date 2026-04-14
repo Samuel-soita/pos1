@@ -27,15 +27,30 @@ export async function verifyLedgerIntegrity(currentBusinessId: string) {
 
       // 2. Validate Ledger Mapping (No missing Product IDs)
       const ledgerEvents = await db.inventory_ledger.filter(e => e.businessId === currentBusinessId).toArray();
-      const productIds = new Set((await db.products.where('businessId').equals(currentBusinessId).toArray()).map(p => p.id));
+      const products = await db.products.where('businessId').equals(currentBusinessId).toArray();
+      const productIds = new Set(products.map(p => p.id));
       
       for (const event of ledgerEvents) {
         if (!productIds.has(event.productId)) {
           console.error(`[ACL] Corruption detected: Inventory ledger event ${event.id} references missing product ${event.productId}.`);
-          // Mark for rehydration from cloud if needed, or delete orphaned event.
-          // In an append-only architecture, we must reconstruct from cloud truth.
           repairsMade++;
-          // A robust ACL here would flag a red-dot for the owner "Integrity Error: Run Full Cloud Restore"
+        }
+      }
+
+      // 3. BACKGROUND AUDIT: Verify Product Quantities vs Ledger Sum
+      // This is a slow check but crucial for production parity verification.
+      for (const product of products) {
+        const productEvents = ledgerEvents.filter(e => e.productId === product.id);
+        const expectedQuantity = productEvents.reduce((acc, e) => {
+          if (e.action === 'ADD' || e.action === 'AUDIT') return acc + e.quantity;
+          if (e.action === 'SALE' || e.action === 'REFUND' || e.action === 'WASTE') return acc - e.quantity;
+          return acc;
+        }, 0);
+
+        // We only warn here to avoid blocking UI, as discrepancies might be due to compaction
+        if (Math.abs(product.quantity - expectedQuantity) > 0.001) {
+          console.warn(`[ACL] Inventory Mismatch: Product ${product.name} (QTY: ${product.quantity}) differs from ledger expected (${expectedQuantity}).`);
+          // Note: In Phase 4, we could auto-correct this if the discrepancy is large.
         }
       }
     });

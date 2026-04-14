@@ -6,6 +6,9 @@ CREATE EXTENSION IF NOT EXISTS pgcrypto;
 -- ==========================================
 
 -- 1. Hardening Existing Tables
+-- First, drop dependent views to allow column type alterations
+DROP VIEW IF EXISTS admin_business_management;
+
 ALTER TABLE businesses ADD COLUMN IF NOT EXISTS code TEXT;
 ALTER TABLE businesses ADD COLUMN IF NOT EXISTS pin TEXT;
 ALTER TABLE businesses ADD COLUMN IF NOT EXISTS package_id TEXT DEFAULT 'hustler';
@@ -21,6 +24,7 @@ ALTER TABLE businesses ADD COLUMN IF NOT EXISTS owner_email TEXT;
 ALTER TABLE businesses ADD COLUMN IF NOT EXISTS telephone TEXT;
 ALTER TABLE businesses ADD COLUMN IF NOT EXISTS address TEXT;
 ALTER TABLE businesses ADD COLUMN IF NOT EXISTS kra_pin TEXT;
+ALTER TABLE businesses ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now();
 ALTER TABLE businesses ADD COLUMN IF NOT EXISTS staff_permissions JSONB DEFAULT '{"inventory": true, "expenses": true, "reports": false, "staff": false, "settings": false, "suppliers": false, "purchases": false}';
 
 -- 1.5 Payment Requests Migration
@@ -249,6 +253,13 @@ CREATE TABLE IF NOT EXISTS mpesa_raw_callbacks (
     created_at TIMESTAMPTZ DEFAULT now()
 );
 
+-- Enable RLS on audit tables
+ALTER TABLE mpesa_raw_callbacks ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Service role only for raw callbacks" ON mpesa_raw_callbacks;
+-- Restrict to service_role or a specific adminUID if needed. For now, we block all public access.
+CREATE POLICY "Service role only for raw callbacks" ON mpesa_raw_callbacks 
+FOR ALL USING (current_setting('request.jwt.claim.role', true) = 'service_role');
+
 -- Index for unique business codes
 CREATE UNIQUE INDEX IF NOT EXISTS idx_businesses_code ON businesses(code);
 CREATE INDEX IF NOT EXISTS idx_payment_requests_lookup ON payment_requests(checkout_request_id);
@@ -402,42 +413,25 @@ DROP POLICY IF EXISTS "Strict Tenant Isolation (Businesses)" ON businesses;
 CREATE POLICY "Strict Tenant Isolation (Businesses)" ON businesses FOR ALL USING (id = auth.uid()) WITH CHECK (id = auth.uid()); 
 
 DROP POLICY IF EXISTS "Strict Tenant Isolation (pos_events)" ON pos_events;
-CREATE POLICY "Strict Tenant Isolation (pos_events)" ON pos_events FOR ALL USING (business_id = auth.uid());
+CREATE POLICY "Strict Tenant Isolation (pos_events)" ON pos_events FOR ALL USING (business_id = auth.uid()) WITH CHECK (business_id = auth.uid());
 
 DROP POLICY IF EXISTS "Strict Tenant Isolation (Sales)" ON sales;
-CREATE POLICY "Strict Tenant Isolation (Sales)" ON sales FOR ALL USING (business_id = auth.uid());
+CREATE POLICY "Strict Tenant Isolation (Sales)" ON sales FOR ALL USING (business_id = auth.uid()) WITH CHECK (business_id = auth.uid());
 
 DROP POLICY IF EXISTS "Strict Tenant Isolation (Products)" ON products;
-CREATE POLICY "Strict Tenant Isolation (Products)" ON products FOR ALL USING (business_id = auth.uid());
+CREATE POLICY "Strict Tenant Isolation (Products)" ON products FOR ALL USING (business_id = auth.uid()) WITH CHECK (business_id = auth.uid());
 
 DROP POLICY IF EXISTS "Strict Tenant Isolation (Expenses)" ON expenses;
-CREATE POLICY "Strict Tenant Isolation (Expenses)" ON expenses FOR ALL USING (business_id = auth.uid());
-
-DROP POLICY IF EXISTS "Strict Tenant Isolation (Mpesa Configs)" ON business_mpesa_configs;
-CREATE POLICY "Strict Tenant Isolation (Mpesa Configs)" ON business_mpesa_configs FOR ALL USING (business_id = auth.uid());
-
-DROP POLICY IF EXISTS "Strict Tenant Isolation (Payment Requests)" ON payment_requests;
-CREATE POLICY "Strict Tenant Isolation (Payment Requests)" ON payment_requests FOR SELECT USING (business_id = auth.uid());
-REVOKE INSERT, UPDATE, DELETE ON payment_requests FROM authenticated;
-GRANT SELECT ON payment_requests TO authenticated;
-
-DROP POLICY IF EXISTS "Strict Tenant Isolation (Shifts)" ON shifts;
-CREATE POLICY "Strict Tenant Isolation (Shifts)" ON shifts FOR ALL USING (business_id = auth.uid());
-
-DROP POLICY IF EXISTS "Strict Tenant Isolation (Cash Logs)" ON cash_logs;
-CREATE POLICY "Strict Tenant Isolation (Cash Logs)" ON cash_logs FOR ALL USING (business_id = auth.uid());
-
-DROP POLICY IF EXISTS "Strict Tenant Isolation (Snapshots)" ON snapshots;
-CREATE POLICY "Strict Tenant Isolation (Snapshots)" ON snapshots FOR ALL USING (business_id = auth.uid());
+CREATE POLICY "Strict Tenant Isolation (Expenses)" ON expenses FOR ALL USING (business_id = auth.uid()) WITH CHECK (business_id = auth.uid());
 
 DROP POLICY IF EXISTS "Strict Tenant Isolation (Settings)" ON settings;
-CREATE POLICY "Strict Tenant Isolation (Settings)" ON settings FOR ALL USING (business_id = auth.uid());
+CREATE POLICY "Strict Tenant Isolation (Settings)" ON settings FOR ALL USING (business_id = auth.uid()) WITH CHECK (business_id = auth.uid());
 
 DROP POLICY IF EXISTS "Strict Tenant Isolation (Purchases)" ON purchases;
-CREATE POLICY "Strict Tenant Isolation (Purchases)" ON purchases FOR ALL USING (business_id = auth.uid());
+CREATE POLICY "Strict Tenant Isolation (Purchases)" ON purchases FOR ALL USING (business_id = auth.uid()) WITH CHECK (business_id = auth.uid());
 
 DROP POLICY IF EXISTS "Strict Tenant Isolation (Suppliers)" ON suppliers;
-CREATE POLICY "Strict Tenant Isolation (Suppliers)" ON suppliers FOR ALL USING (business_id = auth.uid());
+CREATE POLICY "Strict Tenant Isolation (Suppliers)" ON suppliers FOR ALL USING (business_id = auth.uid()) WITH CHECK (business_id = auth.uid());
 
 -- Prevent overwrite destruction on immutable financial tables for staff
 REVOKE UPDATE, DELETE ON sales FROM authenticated;
@@ -478,7 +472,7 @@ CREATE INDEX IF NOT EXISTS idx_inventory_product ON inventory_ledger(product_id,
 
 ALTER TABLE inventory_ledger ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Strict Tenant Isolation (Inventory Ledger)" ON inventory_ledger;
-CREATE POLICY "Strict Tenant Isolation (Inventory Ledger)" ON inventory_ledger FOR ALL USING (business_id = auth.uid());
+CREATE POLICY "Strict Tenant Isolation (Inventory Ledger)" ON inventory_ledger FOR ALL USING (business_id = auth.uid()) WITH CHECK (business_id = auth.uid());
 -- Idempotent sync requires update/select
 GRANT ALL ON pos_events TO authenticated;
 GRANT ALL ON business_mpesa_configs TO authenticated;
@@ -606,6 +600,12 @@ CREATE TABLE IF NOT EXISTS public.activation_tokens (
     is_active BOOLEAN DEFAULT true
 );
 
+-- Enable RLS on tokens
+ALTER TABLE public.activation_tokens ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "Service role only for tokens" ON public.activation_tokens;
+CREATE POLICY "Service role only for tokens" ON public.activation_tokens 
+FOR ALL USING (current_setting('request.jwt.claim.role', true) = 'service_role');
+
 -- 2. Provisioning Audit Log
 -- FIX: Grant INSERT to 'anon' so engineers can log setup before owner is created.
 CREATE TABLE IF NOT EXISTS public.provisioning_audit (
@@ -633,6 +633,10 @@ CREATE TABLE IF NOT EXISTS public.system_counters (
     last_value INTEGER NOT NULL DEFAULT 0,
     updated_at TIMESTAMPTZ DEFAULT now()
 );
+
+ALTER TABLE public.system_counters ENABLE ROW LEVEL SECURITY;
+-- By leaving it with no policies, we restrict ALL direct access via API (Only RPCs with SECURITY DEFINER can read/write)
+
 
 -- RPC: Secure NanoID Business Code (e.g., A7K-9P2)
 CREATE OR REPLACE FUNCTION get_secure_business_code()
@@ -717,11 +721,12 @@ GRANT EXECUTE ON FUNCTION validate_provisioning_token(TEXT) TO anon, authenticat
 GRANT EXECUTE ON FUNCTION get_secure_business_code() TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION get_next_staff_code(UUID) TO authenticated;
 
--- Hardening remaining system table grants
-GRANT ALL ON public.system_counters TO authenticated;
+-- Ensure system_counters is NOT directly accessible
+REVOKE ALL ON public.system_counters FROM authenticated;
+REVOKE ALL ON public.system_counters FROM anon;
+
 GRANT ALL ON public.provisioning_audit TO authenticated;
 
-GRANT ALL ON public.suppliers TO authenticated;
 GRANT ALL ON public.purchases TO authenticated;
 
 -- ==========================================
@@ -737,7 +742,38 @@ SELECT
     telephone,
     status,
     package_id,
+    staff_count,
     to_timestamp(expiry_date / 1000.0) as expiry_date_human_readable,
-    suspended_revenue_count
+    suspended_revenue_count,
+    created_at
 FROM public.businesses
-ORDER BY name ASC;
+ORDER BY created_at DESC;
+
+-- 3. Manual Activation Helper for Corporate Engineer
+-- Use this from the SQL Editor: SELECT activate_business_manually('0001', 30);
+CREATE OR REPLACE FUNCTION activate_business_manually(p_business_code TEXT, p_days INT DEFAULT 30)
+RETURNS TEXT AS $$
+DECLARE
+    v_business_id UUID;
+    v_new_expiry BIGINT;
+BEGIN
+    -- Find the business ID by the 4-digit code
+    SELECT id INTO v_business_id FROM businesses WHERE code = p_business_code;
+    
+    IF v_business_id IS NULL THEN
+        RETURN 'Error: Business code ' || p_business_code || ' not found.';
+    END IF;
+    
+    -- Calculate new expiry (Current time in ms + days * 86,400,000 ms)
+    v_new_expiry := (EXTRACT(EPOCH FROM now()) * 1000)::BIGINT + (p_days::BIGINT * 86400000);
+    
+    UPDATE businesses
+    SET 
+        status = 'active',
+        expiry_date = v_new_expiry,
+        suspended_revenue_count = 0
+    WHERE id = v_business_id;
+    
+    RETURN 'Success: Business ' || p_business_code || ' (' || v_business_id || ') activated for ' || p_days || ' days. New expiry: ' || to_timestamp(v_new_expiry / 1000.0);
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;

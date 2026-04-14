@@ -4,8 +4,6 @@ import { useAuth } from '../hooks/useAuth';
 import { db } from '../db/db';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { BarChart3, TrendingUp, Download, PieChart, FileText, Users, DollarSign } from 'lucide-react';
-import jsPDF from 'jspdf';
-import autoTable from 'jspdf-autotable';
 
 export function Reports() {
   const { userType, businessId } = useAuth();
@@ -43,9 +41,15 @@ export function Reports() {
     document.body.removeChild(link);
   };
 
-  const handleExportPDF = () => {
+  const handleExportPDF = async () => {
     if (sales.length === 0) return alert('No data to export for this period.');
     
+    // Dynamically load heavy PDF libs only when needed
+    const [{ default: jsPDF }, { default: autoTable }] = await Promise.all([
+      import('jspdf'),
+      import('jspdf-autotable')
+    ]);
+
     const doc = new jsPDF();
     
     // Header

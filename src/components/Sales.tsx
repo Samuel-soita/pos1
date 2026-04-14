@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, lazy, Suspense } from 'react';
 import { useInventory } from '../hooks/useInventory';
 import { useSales } from '../hooks/useSales';
 import { useSubscription } from '../hooks/useSubscription';
@@ -8,11 +8,13 @@ import { Search, ShoppingCart, Trash2, Plus, Minus, CheckCircle, X, Banknote, Sm
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, type Product, type Sale } from '../db/db';
 import { usePrinter } from '../hooks/usePrinter';
-import { BarcodeScanner } from './BarcodeScanner';
-import { History } from './History';
 import { useSyncStatus } from '../hooks/useSync';
 import { useHardwareScanner } from '../hooks/useHardwareScanner';
 import { playChime, playBeep } from '../utils/audio';
+
+// Lazy load heavy or secondary sub-components for instant Sales view boot
+const BarcodeScanner = lazy(() => import('./BarcodeScanner').then(m => ({ default: m.BarcodeScanner })));
+const History = lazy(() => import('./History').then(m => ({ default: m.History })));
 
 export function Sales() {
   const { products } = useInventory();
@@ -204,7 +206,9 @@ export function Sales() {
         >
           <ArrowLeft size={18} /> Back to Register
         </button>
-        <History />
+        <Suspense fallback={<div style={{ padding: '20px', textAlign: 'center' }}>Loading History...</div>}>
+          <History />
+        </Suspense>
       </div>
     );
   }
@@ -612,10 +616,12 @@ export function Sales() {
       )}
 
       {showScanner && (
-        <BarcodeScanner 
-          onScan={handleScanProduct}
-          onClose={() => setShowScanner(false)}
-        />
+        <Suspense fallback={null}>
+          <BarcodeScanner 
+            onScan={handleScanProduct}
+            onClose={() => setShowScanner(false)}
+          />
+        </Suspense>
       )}
     </div>
     <footer style={{ marginTop: '20px', padding: '12px', background: 'var(--bg-secondary)', borderRadius: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: 'var(--text-muted)', fontSize: '0.85rem' }}>

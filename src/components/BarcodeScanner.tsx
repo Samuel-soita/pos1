@@ -31,14 +31,16 @@ export function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps) {
   }, []);
 
   useEffect(() => {
+    let html5QrCode: Html5Qrcode | null = null;
     const scannerId = "reader";
-    const html5QrCode = new Html5Qrcode(scannerId);
-    scannerRef.current = html5QrCode;
-
-    const config = { fps: 10, qrbox: { width: 250, height: 150 } };
 
     const startScanner = async () => {
       try {
+        const { Html5Qrcode } = await import('html5-qrcode');
+        html5QrCode = new Html5Qrcode(scannerId);
+        scannerRef.current = html5QrCode;
+
+        const config = { fps: 10, qrbox: { width: 250, height: 150 } };
         await html5QrCode.start(
           { facingMode: "environment" },
           config,
@@ -54,8 +56,8 @@ export function BarcodeScanner({ onScan, onClose }: BarcodeScannerProps) {
     startScanner();
 
     return () => {
-      if (scannerRef.current?.isScanning) {
-        scannerRef.current.stop().catch(console.error);
+      if (html5QrCode?.isScanning) {
+        html5QrCode.stop().catch(console.error);
       }
     };
   }, [handleScanSuccess]);

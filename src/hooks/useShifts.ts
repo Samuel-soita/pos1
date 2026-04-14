@@ -88,14 +88,27 @@ export function useShifts() {
     playBeep();
   };
 
-  const recordSaleToShift = async (amount: number, method: string) => {
+  const recordSaleToShift = async (amount: number, method: string, splitPayments?: { method: string; amount: number }[]) => {
     if (!activeShift) return;
+
+    let cashDelta = 0;
+    let mpesaDelta = 0;
+
+    if (method === 'Split' && splitPayments) {
+      splitPayments.forEach(p => {
+        if (p.method === 'Cash') cashDelta += p.amount;
+        if (p.method === 'M-Pesa') mpesaDelta += p.amount;
+      });
+    } else {
+      if (method === 'Cash') cashDelta = amount;
+      if (method === 'M-Pesa') mpesaDelta = amount;
+    }
 
     const updatedShift: Shift = {
       ...activeShift,
-      totalSales: activeShift.totalSales + amount,
-      cashSales: method === 'Cash' ? activeShift.cashSales + amount : activeShift.cashSales,
-      mpesaSales: method === 'M-Pesa' ? activeShift.mpesaSales + amount : activeShift.mpesaSales,
+      totalSales: Math.round((activeShift.totalSales + amount) * 100) / 100,
+      cashSales: Math.round((activeShift.cashSales + cashDelta) * 100) / 100,
+      mpesaSales: Math.round((activeShift.mpesaSales + mpesaDelta) * 100) / 100,
     };
 
     await db.shifts.put(updatedShift);
@@ -103,7 +116,47 @@ export function useShifts() {
     const payload = updatedShift;
     const eventHash = await generateEventHash(payload);
 
-    // Sync update
+    await db.pos_events.add({
+      event_id: uuidv4(),
+      business_id: activeShift.businessId,
+      staff_id: activeShift.staffId,
+      event_type: 'SHIFT_UPDATED',
+      payload,
+      client_timestamp: Date.now(),
+      server_timestamp: 0,
+      hash: eventHash,
+      sync_status: 'pending'
+    });
+  };
+
+  const recordVoidToShift = async (amount: number, method: string, splitPayments?: { method: string; amount: number }[]) => {
+    if (!activeShift) return;
+
+    let cashDelta = 0;
+    let mpesaDelta = 0;
+
+    if (method === 'Split' && splitPayments) {
+      splitPayments.forEach(p => {
+        if (p.method === 'Cash') cashDelta += p.amount;
+        if (p.method === 'M-Pesa') mpesaDelta += p.amount;
+      });
+    } else {
+      if (method === 'Cash') cashDelta = amount;
+      if (method === 'M-Pesa') mpesaDelta = amount;
+    }
+
+    const updatedShift: Shift = {
+      ...activeShift,
+      totalSales: Math.round((activeShift.totalSales - amount) * 100) / 100,
+      cashSales: Math.round((activeShift.cashSales - cashDelta) * 100) / 100,
+      mpesaSales: Math.round((activeShift.mpesaSales - mpesaDelta) * 100) / 100,
+    };
+
+    await db.shifts.put(updatedShift);
+    
+    const payload = updatedShift;
+    const eventHash = await generateEventHash(payload);
+
     await db.pos_events.add({
       event_id: uuidv4(),
       business_id: activeShift.businessId,
@@ -121,6 +174,7 @@ export function useShifts() {
     activeShift,
     startShift,
     endShift,
-    recordSaleToShift
+    recordSaleToShift,
+    recordVoidToShift
   };
 }

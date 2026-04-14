@@ -19,7 +19,7 @@ export function useSales() {
   const [cart, setCart] = useState<CartItem[]>([]);
   const { businessId, business, branchId, userType, staffId } = useAuth();
   const { isRegisterOpen } = useCashControl();
-  const { recordSaleToShift } = useShifts();
+  const { recordSaleToShift, recordVoidToShift } = useShifts();
 
   const sales = useLiveQuery(async () => {
     if (!businessId) return [];
@@ -95,9 +95,9 @@ export function useSales() {
       return;
     }
 
-    const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
-    const totalCost = cart.reduce((sum, item) => sum + item.costPrice * item.quantity, 0);
-    const totalProfit = total - taxAmount - totalCost;
+    const total = Math.round(cart.reduce((sum, item) => sum + item.price * item.quantity, 0) * 100) / 100;
+    const totalCost = Math.round(cart.reduce((sum, item) => sum + item.costPrice * item.quantity, 0) * 100) / 100;
+    const totalProfit = Math.round((total - taxAmount - totalCost) * 100) / 100;
     
     const timestamp = Date.now();
     const deviceId = await getDeviceId();
@@ -113,7 +113,7 @@ export function useSales() {
     }));
 
     try {
-      await db.transaction('rw', [db.products, db.sales, db.pos_events, db.snapshots, db.counters, db.settings], async () => {
+      await db.transaction('rw', [db.products, db.sales, db.pos_events, db.snapshots, db.counters, db.settings, db.shifts], async () => {
         // 1. Immutable Event Generation (Sale)
         const salePayload = {
            id: saleId,
@@ -166,38 +166,38 @@ export function useSales() {
           syncStatus: 'synced' // Marked synced purely for the UI. The real sync queue is pos_events.
         });
         
-        // 3. Immutable Event Generation (Stock)
-        for (const item of cart) {
-          const product = await db.products.get(item.id);
-          if (product) {
-            const stockPayload = {
-              productId: item.id,
-              delta: -item.quantity
-            };
+            // 3. Immutable Event Generation (Stock)
+            for (const item of cart) {
+              const product = await db.products.get(item.id);
+              if (!product || product.quantity < item.quantity) {
+                throw new Error(`Critical: ${item.name} went out of stock during transaction!`);
+              }
+
+              const stockPayload = { productId: item.id, delta: -item.quantity };
+              const stockHash = await generateEventHash(stockPayload);
+
+              await db.pos_events.add({
+                event_id: await generateTraceableId('EVT', businessId, business!.code, deviceId),
+                business_id: businessId,
+                staff_id: staffId || 'UNKNOWN',
+                event_type: 'stock_reserved',
+                payload: stockPayload,
+                client_timestamp: timestamp,
+                server_timestamp: timestamp,
+                hash: stockHash,
+                sync_status: 'pending'
+              });
+
+              await db.products.update(item.id, {
+                quantity: Math.round((product.quantity - item.quantity) * 100) / 100,
+                updatedAt: Date.now()
+              });
+            }
+
+            // 4. Update Shift (Now inside the transaction!)
+            await recordSaleToShift(total, paymentMethod, splitPayments);
             
-            const stockHash = await generateEventHash(stockPayload);
-
-            const stockEvent = {
-              event_id: await generateTraceableId('EVT', businessId, business!.code, deviceId),
-              business_id: businessId,
-              staff_id: staffId || 'UNKNOWN',
-              event_type: 'stock_reserved' as const,
-              payload: stockPayload,
-              client_timestamp: Date.now(),
-              server_timestamp: Date.now(),
-              hash: stockHash,
-              sync_status: 'pending' as const
-            };
-            await db.pos_events.add(stockEvent);
-
-            // Directly update the generic 'products' UI list (Our materialized stock snapshot)
-            await db.products.update(item.id, {
-              quantity: product.quantity - item.quantity,
-              updatedAt: Date.now()
-            });
-          }
-        }
-        // 4. Update Emergency Sale Counter if suspended
+            // 5. Update Emergency Sale Counter if suspended
         if (business!.status === 'suspended') {
           await db.businesses.update(businessId, {
             suspendedRevenueCount: (business!.suspendedRevenueCount || 0) + 1
@@ -218,6 +218,72 @@ export function useSales() {
     }
   };
 
+  const voidSale = async (saleId: string, reason: string) => {
+    if (!businessId || !business) return;
+
+    const sale = await db.sales.get(saleId);
+    if (!sale || sale.status === 'voided') return;
+
+    try {
+      await db.transaction('rw', [db.products, db.sales, db.pos_events, db.counters, db.settings, db.shifts], async () => {
+        const deviceId = await getDeviceId();
+        const timestamp = Date.now();
+
+        // 1. Mark Sale as Voided
+        await db.sales.update(saleId, { status: 'voided', voidReason: reason });
+
+        // 2. Restore Stock
+        for (const item of sale.items) {
+          const product = await db.products.get(item.productId);
+          if (product) {
+            await db.products.update(item.productId, {
+              quantity: product.quantity + item.quantity,
+              updatedAt: Date.now()
+            });
+
+            // Log Stock Restoration Event
+            const stockPayload = { productId: item.productId, delta: item.quantity, reason: 'VOID' };
+            const stockHash = await generateEventHash(stockPayload);
+            await db.pos_events.add({
+              event_id: await generateTraceableId('EVT', businessId, business.code, deviceId),
+              business_id: businessId,
+              staff_id: staffId || 'OWNER',
+              event_type: 'stock_restored',
+              payload: stockPayload,
+              client_timestamp: timestamp,
+              server_timestamp: timestamp,
+              hash: stockHash,
+              sync_status: 'pending'
+            });
+          }
+        }
+
+        // 3. Log Void Event
+        const voidPayload = { saleId, reason };
+        const voidHash = await generateEventHash(voidPayload);
+        await db.pos_events.add({
+          event_id: await generateTraceableId('EVT', businessId, business.code, deviceId),
+          business_id: businessId,
+          staff_id: staffId || 'OWNER',
+          event_type: 'sale_voided',
+          payload: voidPayload,
+          client_timestamp: timestamp,
+          server_timestamp: timestamp,
+          hash: voidHash,
+          sync_status: 'pending'
+        });
+
+        // 4. Update Shift (Atomic!)
+        await recordVoidToShift(sale.total, sale.paymentMethod, sale.splitPayments);
+      });
+
+      return { success: true };
+    } catch (error) {
+      console.error('Void failed:', error);
+      return { success: false, error };
+    }
+  };
+
   return {
     cart,
     sales,
@@ -226,6 +292,7 @@ export function useSales() {
     updateCartQuantity,
     clearCart,
     completeSale,
+    voidSale,
     cartTotal: cart.reduce((sum, item) => sum + item.price * item.quantity, 0),
   };
 }

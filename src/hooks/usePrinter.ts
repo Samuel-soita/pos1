@@ -282,11 +282,56 @@ export function usePrinter() {
     }
   }, [transport, btDevice, usbDevice, serialPort]);
 
+  const printZReport = useCallback(async (zData: { openingFloat: number, cashSales: number, mpesaSales: number, expenses: number, expectedCash: number, salesCount: number, expensesCount: number }, business: { name: string; address?: string }) => {
+    if (!transport) return;
+    setIsPrinting(true);
+
+    try {
+      const encoder = new EscPosEncoder();
+      encoder.initialize().setCharTable(0).align('center');
+      encoder.bold(true).text('*** Z-REPORT ***').newline().bold(false);
+      encoder.text(business.name).newline();
+      
+      encoder.newline().text('--------------------------------').newline();
+      encoder.align('left').text(`Report Time: ${new Date().toLocaleString()}`).newline();
+      encoder.text('--------------------------------').newline();
+
+      encoder.text(`Opening Float: `).align('right').text(`KES ${zData.openingFloat.toLocaleString()}`).align('left').newline();
+      encoder.text(`(+) Cash Sales: `).align('right').text(`KES ${zData.cashSales.toLocaleString()}`).align('left').newline();
+      encoder.text(`(+) M-Pesa Sales:`).align('right').text(`KES ${zData.mpesaSales.toLocaleString()}`).align('left').newline();
+      encoder.text(`(-) Expenses: `).align('right').text(`KES ${zData.expenses.toLocaleString()}`).align('left').newline();
+      
+      encoder.text('--------------------------------').newline();
+      encoder.bold(true).text(`EXPECTED CASH: `).align('right').text(`KES ${zData.expectedCash.toLocaleString()}`).align('left').bold(false).newline();
+      encoder.text('--------------------------------').newline();
+
+      encoder.newline();
+      encoder.text(`Sales Transactions: ${zData.salesCount}`).newline();
+      encoder.text(`Expense Records:    ${zData.expensesCount}`).newline();
+      
+      encoder.newline(3).text('................................').newline();
+      encoder.text('Verified By / Signature').newline();
+
+      encoder.newline(2).align('center').text('Powered by SMUTA PAY').newline();
+      encoder.cut();
+
+      const data = encoder.encode();
+      const activeDevice = transport === 'BT' ? btDevice : transport === 'USB' ? usbDevice : serialPort;
+      await writeChunked(transport, activeDevice, data);
+    } catch (e) {
+      console.error("Z-Report Print failed:", e);
+      alert(`Printing failed: ${e instanceof Error ? e.message : 'Unknown error'}`);
+    } finally {
+      setIsPrinting(false);
+    }
+  }, [transport, btDevice, usbDevice, serialPort]);
+
   return {
     connectBT,
     connectUSB,
     connectSerial,
     printReceipt,
+    printZReport,
     isPrinting,
     isReconnecting,
     transport,

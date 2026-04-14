@@ -180,6 +180,29 @@ export function useSync() {
                 }
                 break;
               }
+              case 'stock_restored': {
+                const productId = payload.productId || payload.id;
+                const delta = payload.delta || 0;
+                const product = await db.products.get(productId);
+                if (product) {
+                  await db.products.update(productId, {
+                    quantity: product.quantity + delta,
+                    updatedAt: Date.now()
+                  });
+                }
+                break;
+              }
+              case 'INVENTORY_AUDITED': {
+                const productId = payload.productId || payload.id;
+                const physicalCount = payload.physicalCount;
+                if (productId && physicalCount !== undefined) {
+                  await db.products.update(productId, {
+                    quantity: physicalCount,
+                    updatedAt: Date.now()
+                  });
+                }
+                break;
+              }
               case 'PRODUCT_CREATED':
                 await db.products.put({ ...payload, syncStatus: 'synced' });
                 break;
@@ -194,6 +217,13 @@ export function useSync() {
               case 'sale_created':
                 await db.sales.put({ ...payload, syncStatus: 'synced' });
                 break;
+              case 'sale_voided': {
+                const { saleId, reason } = payload;
+                if (saleId) {
+                  await db.sales.update(saleId, { status: 'voided', voidReason: reason });
+                }
+                break;
+              }
               case 'EXPENSE_CREATED':
                 await db.expenses.put({ ...payload, syncStatus: 'synced' });
                 break;
@@ -206,12 +236,14 @@ export function useSync() {
 
               // --- Personnel & Logistics ---
               case 'STAFF_CREATED':
+              case 'STAFF_UPDATED':
                 await db.staff.put(payload);
                 break;
               case 'STAFF_DELETED':
                 await db.staff.delete(payload.id);
                 break;
               case 'BRANCH_CREATED':
+              case 'BRANCH_UPDATED':
                 await db.branches.put(payload);
                 break;
               case 'BRANCH_DELETED':
@@ -249,11 +281,14 @@ export function useSync() {
               case 'RECURRING_EXPENSE_UPDATED':
                 await db.recurring_expenses.put(payload);
                 break;
+              case 'RECURRING_EXPENSE_DELETED':
+                await db.recurring_expenses.delete(payload.id);
+                break;
               case 'BUSINESS_UPDATED': {
                 // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 const updatePayload: Record<string, any> = { ...payload };
-                if (payload.staff_permissions) {
-                  updatePayload.staffPermissions = payload.staff_permissions;
+                if (payload.staff_permissions || payload.staffPermissions) {
+                  updatePayload.staffPermissions = payload.staff_permissions || payload.staffPermissions;
                   delete updatePayload.staff_permissions;
                 }
                 await db.businesses.update(payload.id, updatePayload);

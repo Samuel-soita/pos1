@@ -51,7 +51,7 @@ export function useSubscription() {
 
   const lastSyncTimeStr = localStorage.getItem(`entitlement_${business?.id}_last_sync`);
   const lastSyncTime = lastSyncTimeStr ? parseInt(lastSyncTimeStr, 10) : 0;
-  const isLimitedMode = lastSyncTime === 0 || (now - lastSyncTime > 7 * 24 * 60 * 60 * 1000);
+  const isLimitedMode = lastSyncTime === 0 || (now - lastSyncTime > 1 * 24 * 60 * 60 * 1000); // Tightened to 1 day
 
   const statusInfo = useMemo(() => {
     if (!business) return { status: 'active' as SubscriptionStatus, daysLeft: 0, message: '', isLocked: false, isTrial: false, limitReached: false, trialUsed: false, isLimitedMode: false };
@@ -60,7 +60,7 @@ export function useSubscription() {
     const threeDaysMs = 3 * 24 * 60 * 60 * 1000;
     const isTrial = businessStatus === 'trial';
 
-    const limitCondition = isLimitedMode ? suspendedRevenueCount >= 20 : suspendedRevenueCount >= 5;
+    const limitCondition = isLimitedMode ? suspendedRevenueCount >= 7 : suspendedRevenueCount >= 5; // 7 for blackout, 5 for online
 
     // 1. Pending Payment Flow (Trust-First)
     if (businessStatus === 'pending_payment' || businessStatus === 'pending_verification') {
@@ -119,7 +119,7 @@ export function useSubscription() {
     return {
       status: 'suspended' as SubscriptionStatus,
       daysLeft: 0,
-      message: limitReached ? 'Emergency sales limit reached. Sync required.' : `Suspended: ${isLimitedMode ? 20 - suspendedRevenueCount : 5 - suspendedRevenueCount} emergency sales left`,
+      message: limitReached ? 'Emergency sales limit reached. Sync required.' : `Suspended: ${isLimitedMode ? 7 - suspendedRevenueCount : 5 - suspendedRevenueCount} emergency sales left`,
       isLocked: limitReached,
       isTrial: false,
       limitReached,

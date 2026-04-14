@@ -1,35 +1,42 @@
 import { useState, useEffect } from 'react';
-import { db, type Business, type Staff } from '../db/db';
+import { db, type Business } from '../db/db';
 import { supabase } from '../lib/supabase';
+import { useLiveQuery } from 'dexie-react-hooks';
 
 export function useAuth() {
   const [userType, setUserType] = useState<'owner' | 'staff' | null>(null);
-  const [currentBusiness, setCurrentBusiness] = useState<Business | null>(null);
-  const [currentStaff, setCurrentStaff] = useState<Staff | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  
+  const [bizIdState, setBizIdState] = useState(() => localStorage.getItem('biz_id'));
+  const [staffIdState, setStaffIdState] = useState(() => localStorage.getItem('staff_id'));
+
+  const currentBusiness = useLiveQuery(
+    async () => bizIdState ? await db.businesses.get(bizIdState) : null,
+    [bizIdState]
+  );
+
+  const currentStaff = useLiveQuery(
+    async () => staffIdState ? await db.staff.get(staffIdState) : null,
+    [staffIdState]
+  );
 
   // Persistence & Session Recovery
   useEffect(() => {
     async function loadSession() {
-      const staffId = localStorage.getItem('staff_id');
+      const storedBizId = localStorage.getItem('biz_id');
+      const storedStaffId = localStorage.getItem('staff_id');
       
       const { data: { session } } = await supabase.auth.getSession();
       
-      if (session) {
-        // We have a cloud session, verify local record
-        const biz = await db.businesses.get(session.user.id);
-        if (biz) {
-          setCurrentBusiness(biz);
-          if (!staffId) setUserType('owner');
-        }
-      }
-
-      if (staffId) {
-        const staff = await db.staff.get(staffId);
-        if (staff) {
-          setCurrentStaff(staff);
-          setUserType('staff');
-        }
+      if (storedStaffId) {
+        setStaffIdState(storedStaffId);
+        setUserType('staff');
+      } else if (session) {
+        setBizIdState(session.user.id);
+        setUserType('owner');
+      } else if (storedBizId) {
+        setBizIdState(storedBizId);
+        setUserType('owner');
       }
       setIsLoading(false);
     }
@@ -100,7 +107,7 @@ export function useAuth() {
       }]);
 
       // 6. Direct Entry: Setup session pointers immediately
-      setCurrentBusiness(newBiz);
+      setBizIdState(businessId);
       setUserType('owner');
       localStorage.setItem('biz_id', businessId);
       localStorage.setItem('pinned_biz_code', businessCode);
@@ -168,10 +175,10 @@ export function useAuth() {
             staffCount: remoteBiz.staff_count || 0
           };
           await db.businesses.put(newBiz);
-          setCurrentBusiness(newBiz);
+          setBizIdState(newBiz.id);
        }
     } else {
-      setCurrentBusiness(biz);
+      setBizIdState(biz.id);
     }
 
     setUserType('owner');
@@ -251,7 +258,7 @@ export function useAuth() {
 
     if (!isValid || !staffRecord) throw new Error('Invalid Staff Code or PIN');
 
-    setCurrentStaff(staffRecord);
+    setStaffIdState(staffRecord.id);
     setUserType('staff');
     localStorage.setItem('staff_id', staffRecord.id);
     return staffRecord;
@@ -262,8 +269,8 @@ export function useAuth() {
     localStorage.removeItem('biz_id');
     localStorage.removeItem('staff_id');
     localStorage.removeItem('pinned_biz_code');
-    setCurrentBusiness(null);
-    setCurrentStaff(null);
+    setBizIdState(null);
+    setStaffIdState(null);
     setUserType(null);
     window.location.reload();
   };

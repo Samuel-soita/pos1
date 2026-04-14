@@ -101,6 +101,8 @@ export interface Sale {
   deviceId: string;
   branchId?: string;
   staffId?: string; // Track who made the sale
+  status?: 'active' | 'voided' | 'returned';
+  voidReason?: string;
   syncStatus?: 'pending' | 'synced' | 'failed';
 }
 
@@ -212,7 +214,7 @@ export interface InventoryLedgerEvent {
   id: string; // trace ID
   businessId: string;
   productId: string;
-  action: 'ADD' | 'SALE' | 'REFUND' | 'WASTE';
+  action: 'ADD' | 'SALE' | 'REFUND' | 'WASTE' | 'AUDIT';
   quantity: number;
   recordedAt: number;
   traceId?: string; // Links back to the parent Sale/Expense ID
@@ -238,18 +240,18 @@ const db = new Dexie('POSDatabase') as Dexie & {
   snapshots: EntityTable<MaterializedSnapshot, 'id'>;
 };
 
-db.version(23).stores({
+db.version(24).stores({
   products: 'id, businessId, branchId, name, price, costPrice, quantity, category, barcode, syncStatus',
-  sales: 'id, businessId, branchId, total, totalProfit, timestamp, receiptId, paymentMethod, deviceId, syncStatus',
+  sales: 'id, businessId, [businessId+branchId], [businessId+timestamp], [branchId+timestamp], total, totalProfit, timestamp, receiptId, paymentMethod, deviceId, syncStatus',
   purchases: 'id, businessId, branchId, supplierId, total, timestamp, syncStatus',
   suppliers: 'id, businessId, name, phone, syncStatus',
-  expenses: 'id, businessId, branchId, timestamp, category, status, syncStatus',
+  expenses: 'id, businessId, [businessId+branchId], [businessId+timestamp], [branchId+timestamp], timestamp, category, status, syncStatus',
   recurring_expenses: 'id, businessId, branchId, frequency, nextRun, isActive, syncStatus',
   businesses: 'id, code, name, packageId, [name+code+pin], syncStatus',
   staff: 'id, businessId, branchId, code, idNumber, phoneNumber, [businessId+code+pin], syncStatus',
   settings: 'key',
-  cash_logs: 'id, businessId, branchId, staffId, date, status, [businessId+date], syncStatus',
-  shifts: 'id, businessId, staffId, branchId, status, startTime, syncStatus',
+  cash_logs: 'id, businessId, branchId, staffId, date, status, [businessId+date], [businessId+branchId+date], syncStatus',
+  shifts: 'id, businessId, staffId, [businessId+branchId], [branchId+status], status, startTime, syncStatus',
   branches: 'id, businessId, name, syncStatus',
   counters: 'id, businessId, entityType',
   inventory_ledger: 'id, businessId, productId, recordedAt, traceId, [productId+businessId], syncStatus',

@@ -4,17 +4,21 @@ import { useState } from 'react';
 import { useInventory } from '../hooks/useInventory';
 import { useSubscription } from '../hooks/useSubscription';
 import { type Product } from '../db/db';
+import { parseCSV } from '../utils/csvUtils';
+import { playBeep, playChime } from '../utils/audio';
 
 export function Inventory() {
-  const { products, addProduct, updateProduct, deleteProduct, restockProduct } = useInventory();
+  const { products, addProduct, bulkAddProducts, updateProduct, deleteProduct, restockProduct, auditProduct } = useInventory();
   const { status } = useSubscription();
   const [searchTerm, setSearchTerm] = useState('');
   const [isAdding, setIsAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const [importPreview, setImportPreview] = useState<any[] | null>(null);
+  const [importPreview, setImportPreview] = useState<Omit<Product, 'id' | 'businessId' | 'syncStatus'>[] | null>(null);
   const [isImporting, setIsImporting] = useState(false);
   const { notifications } = useNotifications();
+  const [auditingProduct, setAuditingProduct] = useState<Product | null>(null);
+  const [physicalCount, setPhysicalCount] = useState<number>(0);
+  const [isAuditing, setIsAuditing] = useState(false);
   
   // Form State
   const [formData, setFormData] = useState({
@@ -39,9 +43,11 @@ export function Inventory() {
     
     if (editingId) {
       await updateProduct(editingId, formData);
+      playBeep();
       setEditingId(null);
     } else {
       await addProduct(formData);
+      playChime();
       setIsAdding(false);
     }
     setFormData({ name: '', price: 0, costPrice: 0, quantity: 0, lowStockThreshold: 5, category: '', barcode: '' });
@@ -103,33 +109,28 @@ export function Inventory() {
     reader.onload = (event) => {
       try {
         const text = event.target?.result as string;
-        const lines = text.split('\n');
-        if (lines.length < 2) throw new Error('File is empty or missing headers');
+        const results = parseCSV(text);
+        
+        if (results.length === 0) throw new Error('File is empty or invalid');
 
-        const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
+        const headers = Object.keys(results[0]);
         const required = ['name', 'price', 'quantity'];
         const missing = required.filter(r => !headers.includes(r));
         if (missing.length > 0) throw new Error(`Missing required columns: ${missing.join(', ')}`);
         
-        const parsed = lines.slice(1).filter(l => l.trim()).map(line => {
-          const values = line.split(',').map(v => v.trim());
-          return {
-            name: values[headers.indexOf('name')] || 'Unnamed Product',
-            category: values[headers.indexOf('category')] || 'General',
-            price: parseFloat(values[headers.indexOf('price')]) || 0,
-            costPrice: parseFloat(values[headers.indexOf('cost price')]) || 0,
-            quantity: parseInt(values[headers.indexOf('quantity')]) || 0,
-            barcode: values[headers.indexOf('barcode')] || '',
-            lowStockThreshold: 5
-          };
-        });
+        const parsed = results.map(row => ({
+          name: row['name'] || 'Unnamed Product',
+          category: row['category'] || 'General',
+          price: parseFloat(row['price']) || 0,
+          costPrice: parseFloat(row['cost price'] || row['costprice']) || 0,
+          quantity: parseInt(row['quantity']) || 0,
+          barcode: row['barcode'] || '',
+          lowStockThreshold: 5,
+          updatedAt: Date.now()
+        }));
         setImportPreview(parsed);
       } catch (err: unknown) {
-        if (err instanceof Error) {
-          alert('Import failed: ' + err.message);
-        } else {
-          alert('Import failed with an unknown error.');
-        }
+        alert('Import failed: ' + (err instanceof Error ? err.message : 'Unknown error'));
       }
     };
     reader.readAsText(file);
@@ -139,10 +140,11 @@ export function Inventory() {
     if (!importPreview) return;
     setIsImporting(true);
     try {
-      for (const item of importPreview) {
-        await addProduct(item);
-      }
+      await bulkAddProducts(importPreview);
       setImportPreview(null);
+    } catch (err) {
+      console.error('Import failed:', err);
+      alert('Import failed. Please check your file format.');
     } finally {
       setIsImporting(false);
     }
@@ -260,6 +262,9 @@ export function Inventory() {
                 <td style={{ padding: '16px', color: 'var(--text-muted)' }} data-label="Threshold">{product.lowStockThreshold}</td>
                 <td style={{ padding: '16px', textAlign: 'right', display: 'flex', gap: '8px', justifyContent: 'flex-end' }} data-label="Actions">
                   <div style={{ display: 'flex', gap: '8px' }}>
+                    <button onClick={() => { setAuditingProduct(product); setPhysicalCount(product.quantity); }} className="btn-secondary" style={{ padding: '8px', minHeight: '40px' }} title="Audit Stock" disabled={status === 'suspended'}>
+                      <FileText size={18} />
+                    </button>
                     <button onClick={() => restockProduct(product.id!, 10)} className="btn-secondary" style={{ padding: '8px', minHeight: '40px' }} title="Quick Add 10" disabled={status === 'suspended'}>
                       <PackagePlus size={18} />
                     </button>
@@ -343,6 +348,59 @@ export function Inventory() {
                 {editingId ? 'Update Product' : 'Create Product'}
               </button>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Audit Modal */}
+      {auditingProduct && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div className="card" style={{ width: '100%', maxWidth: '400px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '20px' }}>
+              <h2 style={{ fontSize: '1.25rem', fontWeight: 900 }}>Audit: {auditingProduct.name}</h2>
+              <button onClick={() => setAuditingProduct(null)} style={{ background: 'transparent' }}><X size={24} /></button>
+            </div>
+            
+            <div style={{ background: '#f8fafc', padding: '16px', borderRadius: '12px', marginBottom: '20px', border: '1px solid var(--border)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Ledger Quantity:</span>
+                <span style={{ fontWeight: 800 }}>{auditingProduct.quantity} units</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Variance:</span>
+                <span style={{ fontWeight: 800, color: (physicalCount - auditingProduct.quantity) === 0 ? 'inherit' : (physicalCount - auditingProduct.quantity) > 0 ? 'var(--success)' : 'var(--danger)' }}>
+                  {physicalCount - auditingProduct.quantity > 0 ? '+' : ''}{physicalCount - auditingProduct.quantity}
+                </span>
+              </div>
+            </div>
+
+            <div className="input-group" style={{ marginBottom: '24px' }}>
+              <label>Actual Physical Count on Shelf</label>
+              <input 
+                autoFocus
+                type="number" 
+                value={physicalCount} 
+                onChange={e => setPhysicalCount(parseInt(e.target.value) || 0)} 
+                style={{ fontSize: '1.5rem', textAlign: 'center', fontWeight: 800 }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', gap: '12px' }}>
+              <button 
+                className="btn-primary" 
+                style={{ flex: 2 }}
+                onClick={async () => {
+                  setIsAuditing(true);
+                  await auditProduct(auditingProduct.id!, physicalCount);
+                  setIsAuditing(false);
+                  setAuditingProduct(null);
+                }}
+                disabled={isAuditing}
+              >
+                {isAuditing ? 'Auditing...' : 'Confirm Audit Result'}
+              </button>
+              <button className="btn-secondary" style={{ flex: 1 }} onClick={() => setAuditingProduct(null)}>Cancel</button>
+            </div>
           </div>
         </div>
       )}

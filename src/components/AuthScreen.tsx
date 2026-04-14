@@ -45,16 +45,17 @@ export function AuthScreen() {
         success = false; // Prevents direct entry
       }
     } catch (err: unknown) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const error = err as any; 
-      console.error('Auth Error Details:', error);
-      // Surface the specific Supabase error message if available
-      const msg = error.message || error.error_description || 'Authentication failed';
+      const authError = err as Error; 
+      console.error('Auth Error Details:', authError);
+      
+      const msg = authError.message || 'Authentication failed';
       
       if (msg.includes('Email not confirmed')) {
-        setError('❌ Access Denied: Please check your email and confirm your account, or disable "Confirm Email" in Supabase settings.');
-      } else if (msg.includes('invalid_credentials')) {
-        setError('❌ Invalid Email or PIN. Please check your credentials.');
+        setError('❌ Account verification required. Please check your email.');
+      } else if (msg.toLowerCase().includes('invalid_credentials') || msg.toLowerCase().includes('not found')) {
+        setError('❌ Invalid Credentials. Please check your Code and PIN.');
+      } else if (msg.toLowerCase().includes('network') || msg.toLowerCase().includes('fetch')) {
+        setError('📡 Connection issue. Your session will sync in the background.');
       } else {
         setError(`❌ ${msg}`);
       }
