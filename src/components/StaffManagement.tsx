@@ -207,7 +207,7 @@ export function StaffManagement({ initialView }: { initialView?: string }) {
     const deviceId = await getDeviceId();
 
     // Optimistic Update locally
-    await db.transaction('rw', [db.businesses, db.pos_events], async () => {
+    await db.transaction('rw', [db.businesses, db.pos_events, db.counters], async () => {
       await db.businesses.update(businessId, { staffPermissions: newPerms });
       await db.pos_events.add({
         event_id: await generateTraceableId('SYS', businessId, business.code, deviceId),

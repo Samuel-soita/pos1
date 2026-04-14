@@ -238,7 +238,7 @@ const db = new Dexie('POSDatabase') as Dexie & {
   snapshots: EntityTable<MaterializedSnapshot, 'id'>;
 };
 
-db.version(22).stores({
+db.version(23).stores({
   products: 'id, businessId, branchId, name, price, costPrice, quantity, category, barcode, syncStatus',
   sales: 'id, businessId, branchId, total, totalProfit, timestamp, receiptId, paymentMethod, deviceId, syncStatus',
   purchases: 'id, businessId, branchId, supplierId, total, timestamp, syncStatus',
