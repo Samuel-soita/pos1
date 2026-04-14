@@ -238,8 +238,20 @@ export function Sales() {
           </button>
           <button 
             onClick={() => setView('history')}
-            className="btn-secondary" 
-            style={{ padding: '8px 16px', minHeight: '40px', fontSize: '0.9rem', gap: '8px' }}
+            style={{ 
+              padding: '8px 16px', 
+              minHeight: '40px', 
+              fontSize: '0.9rem', 
+              gap: '8px',
+              background: '#3b82f6',
+              color: 'white',
+              border: 'none',
+              borderRadius: '12px',
+              display: 'flex',
+              alignItems: 'center',
+              fontWeight: 700,
+              cursor: 'pointer'
+            }}
           >
             <HistoryIcon size={18} /> Daily History
           </button>
