@@ -13,12 +13,12 @@ export interface Plan {
 }
 
 export const MODULAR_FEATURES = {
-  inventory_alerts: { id: 'inventory_alerts', name: 'Inventory Alerts', price: 200, icon: 'Package', desc: 'Low stock alerts & automated reorder lists' },
-  branch_management: { id: 'branch_management', name: 'Branch Management', price: 500, icon: 'GitMerge', desc: 'Multi-branch sync & central inventory control' },
-  shift_tracking: { id: 'shift_tracking', name: 'Shift Tracking', price: 300, icon: 'Clock', desc: 'Track staff clock-in/out & register handovers' },
-  advanced_analytics: { id: 'advanced_analytics', name: 'Advanced Analytics', price: 600, icon: 'BarChart3', desc: 'Deep profit analysis & custom forecast reports' },
-  excel_exports: { id: 'excel_exports', name: 'Full Excel Exports', price: 400, icon: 'Download', desc: 'Unlimited data exports for external bookkeeping' },
-  receipt_customization: { id: 'receipt_customization', name: 'Pro Receipt Header', price: 200, icon: 'Printer', desc: 'Add complex logos & custom footers to receipts' }
+  inventory_alerts: { id: 'inventory_alerts', name: 'Inventory Alerts', price: 100, icon: 'Package', desc: 'Low stock alerts & automated reorder lists' },
+  branch_management: { id: 'branch_management', name: 'Branch Management', price: 200, icon: 'GitMerge', desc: 'Multi-branch sync & central inventory control' },
+  shift_tracking: { id: 'shift_tracking', name: 'Shift Tracking', price: 150, icon: 'Clock', desc: 'Track staff clock-in/out & register handovers' },
+  advanced_analytics: { id: 'advanced_analytics', name: 'Advanced Analytics', price: 250, icon: 'BarChart3', desc: 'Deep profit analysis & custom forecast reports' },
+  excel_exports: { id: 'excel_exports', name: 'Full Excel Exports', price: 150, icon: 'Download', desc: 'Unlimited data exports for external bookkeeping' },
+  receipt_customization: { id: 'receipt_customization', name: 'Pro Receipt Header', price: 100, icon: 'Printer', desc: 'Add complex logos & custom footers to receipts' }
 };
 
 export function useSubscription() {
@@ -132,19 +132,19 @@ export function useSubscription() {
     hustler: { 
       id: 'hustler',
       name: 'Hustler Solo', 
-      price: 600, 
+      price: 499, 
       features: ['Basic POS', 'Offline Mode', 'Single Device', 'Thermal Receipts'] 
     },
     growth: { 
       id: 'growth',
       name: 'Growth Business', 
-      price: 1500, 
+      price: 599, 
       features: ['Inventory Alerts', 'Branch Management', 'Shift Tracking', 'Bulk Stock Import'] 
     },
     max: { 
       id: 'max',
       name: 'Max Enterprise', 
-      price: 3500, 
+      price: 699, 
       features: ['Advanced Analytics', 'Unlimited Devices', 'Priority Support', 'Full Excel Exports'] 
     },
     custom: {
@@ -160,18 +160,19 @@ export function useSubscription() {
     [business?.id]
   ) || 0;
 
-  // Extra staff cost (Owner is free, staff 150/mo each)
-  const staffCost = staffCount * 150;
+  // Extra staff cost (Owner is free, staff 100/mo each)
+  const staffCost = staffCount * 100;
 
   // Custom features added by engineer (Legacy count mechanism)
   const legacyCustomCost = (business?.customFeatureCount || 0) * 200;
 
-  // New Modular Features Cost
+  // New Modular Features Cost (Capped at 1000 for custom builds)
   const enabledFeatures = business?.enabledFeatures || [];
-  const modularCost = enabledFeatures.reduce((acc, featId) => {
+  const rawModularCost = enabledFeatures.reduce((acc, featId) => {
     const feat = MODULAR_FEATURES[featId as keyof typeof MODULAR_FEATURES];
     return acc + (feat?.price || 0);
   }, 0);
+  const modularCost = business?.packageId === 'custom' ? Math.min(rawModularCost, 1000) : rawModularCost;
 
   const toggleFeature = async (featureId: string) => {
     if (!business) return;
