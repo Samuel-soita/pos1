@@ -127,7 +127,7 @@ export function Sales() {
             .from('products')
             .select('quantity')
             .eq('id', item.id)
-            .single();
+            .maybeSingle();
           
           if (serverProduct && serverProduct.quantity < item.quantity) {
              alert(`⚠️ Multi-terminal conflict: ${item.name} just went out of stock on another device.`);
