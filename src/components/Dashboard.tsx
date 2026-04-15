@@ -3,7 +3,7 @@ import { useInventory } from '../hooks/useInventory';
 import { useCashControl } from '../hooks/useCashControl';
 import { 
   ShoppingCart, Receipt, Truck,
-  Package, BarChart3, Users, Settings, Lock,
+  Package, BarChart3, Users, Settings, Lock, Unlock,
   AlertTriangle, LogOut, CheckCircle2, X
 } from 'lucide-react';
 import { usePrinter } from '../hooks/usePrinter';
@@ -33,14 +33,17 @@ interface ZReportData {
 export function Dashboard({ onTabChange }: { onTabChange: (tab: string) => void }) {
   const { userType, business, staff } = useAuth();
   const { getLowStockProducts } = useInventory();
-  const { isRegisterOpen, getZReportData, closeRegister, currentLog } = useCashControl();
+  const { isRegisterOpen, getZReportData, closeRegister, openRegister, currentLog } = useCashControl();
   const { printZReport, isConnected } = usePrinter();
   const { requestAuth } = useLayout();
   
   const [zData, setZData] = useState<ZReportData | null>(null);
   const [showClosingModal, setShowClosingModal] = useState(false);
   const [actualCash, setActualCash] = useState<number>(0);
+  const [openingFloat, setOpeningFloat] = useState<number>(0);
+  const [showOpeningModal, setShowOpeningModal] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
+  const [isOpening, setIsOpening] = useState(false);
 
   const lowStock = getLowStockProducts?.() || [];
 
@@ -136,7 +139,7 @@ export function Dashboard({ onTabChange }: { onTabChange: (tab: string) => void 
       </header>
 
       {/* EOD Quick Status */}
-      {isRegisterOpen && zData && (
+      {isRegisterOpen && zData ? (
         <section style={{ padding: '0 20px', marginBottom: '32px' }}>
           <div className="card" style={{ 
             background: 'var(--bg-secondary)', 
@@ -159,7 +162,7 @@ export function Dashboard({ onTabChange }: { onTabChange: (tab: string) => void 
               </button>
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '16px' }}>
+            <div style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', display: 'grid', gap: '16px' }}>
               <div style={{ background: 'white', padding: '12px', borderRadius: '12px', border: '1px solid var(--border)' }}>
                 <p style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '4px' }}>CASH SALES</p>
                 <p style={{ fontSize: '1.15rem', fontWeight: 900 }}>KES {zData.cashSales.toLocaleString()}</p>
@@ -177,6 +180,35 @@ export function Dashboard({ onTabChange }: { onTabChange: (tab: string) => void 
                 <p style={{ fontSize: '1.15rem', fontWeight: 900, color: '#15803d' }}>KES {zData.expectedCash.toLocaleString()}</p>
               </div>
             </div>
+          </div>
+        </section>
+      ) : !isRegisterOpen && (
+        <section style={{ padding: '0 20px', marginBottom: '32px' }}>
+          <div className="card" style={{ 
+            background: 'var(--card-gradient-primary)', 
+            color: 'white',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            textAlign: 'center',
+            padding: '40px 20px',
+            gap: '16px',
+            boxShadow: '0 20px 25px -5px rgba(37, 99, 235, 0.2)'
+          }}>
+            <div style={{ background: 'rgba(255,255,255,0.2)', padding: '16px', borderRadius: '50%' }}>
+              <Unlock size={32} />
+            </div>
+            <div>
+              <h2 style={{ fontSize: '1.5rem', fontWeight: 900, marginBottom: '8px' }}>Register is Locked</h2>
+              <p style={{ opacity: 0.9, fontSize: '0.95rem' }}>Start your business day to begin recording sales and tracking revenue.</p>
+            </div>
+            <button 
+              onClick={() => setShowOpeningModal(true)}
+              className="btn-primary" 
+              style={{ background: 'white', color: 'var(--primary)', border: 'none', height: '56px', padding: '0 40px', fontSize: '1.1rem', fontWeight: 800 }}
+            >
+              Open Register
+            </button>
           </div>
         </section>
       )}
@@ -223,9 +255,54 @@ export function Dashboard({ onTabChange }: { onTabChange: (tab: string) => void 
         </div>
       </section>
 
+      {/* Opening Modal */}
+      {showOpeningModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '20px' }}>
+          <div className="card" style={{ width: '100%', maxWidth: '400px', animation: 'auth-fade 0.3s ease-out' }}>
+            <h2 style={{ marginBottom: '8px', fontWeight: 900 }}>Open Register</h2>
+            <p style={{ color: 'var(--text-muted)', marginBottom: '24px', fontSize: '0.9rem' }}>Record the starting cash in your drawer.</p>
+            
+            <div className="input-group" style={{ marginBottom: '24px' }}>
+              <label>Opening Float (Cash On Hand)</label>
+              <input 
+                autoFocus
+                type="number" 
+                value={openingFloat} 
+                onChange={e => setOpeningFloat(parseFloat(e.target.value) || 0)} 
+                style={{ fontSize: '2rem', textAlign: 'center', fontWeight: 900, height: '74px', background: 'var(--bg-secondary)' }}
+                placeholder="0.00"
+              />
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <button 
+                onClick={async () => {
+                   setIsOpening(true);
+                   await openRegister(openingFloat);
+                   setIsOpening(false);
+                   setShowOpeningModal(false);
+                }}
+                className="btn-primary" 
+                style={{ height: '54px', fontSize: '1.1rem' }}
+                disabled={isOpening}
+              >
+                {isOpening ? 'Opening...' : 'Start Business Day'}
+              </button>
+              <button 
+                onClick={() => setShowOpeningModal(false)}
+                className="btn-secondary" 
+                style={{ height: '44px' }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Closing Reconciliation Modal */}
       {showClosingModal && zData && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '20px' }}>
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000, padding: '20px' }}>
           <div className="card" style={{ width: '100%', maxWidth: '400px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '24px' }}>
               <h2 style={{ fontSize: '1.5rem', fontWeight: 900 }}>Close Register</h2>
