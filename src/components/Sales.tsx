@@ -584,7 +584,7 @@ export function Sales() {
                       <p style={{ fontSize: '1.1rem', fontWeight: 900, color: '#15803d', marginBottom: '16px' }}>Pay KES {cartTotal.toFixed(2)} to 0768640343</p>
                       
                       <div className="input-group" style={{ textAlign: 'left', marginBottom: 0 }}>
-                        <label style={{ color: '#166534', fontWeight: 700 }}>(Optional) M-Pesa Code</label>
+                        <label style={{ color: '#166534', fontWeight: 700 }}>M-Pesa Code</label>
                         <p style={{ fontSize: '0.75rem', color: '#166534', marginBottom: '8px' }}>Leave blank if you visually confirmed the payment on your phone.</p>
                         <input 
                           type="text" 
