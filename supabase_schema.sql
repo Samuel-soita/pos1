@@ -824,10 +824,17 @@ BEGIN
             DELETE FROM public.products WHERE id = payload->>'id';
 
         WHEN 'STOCK_RESERVED', 'INVENTORY_RESTOCKED', 'stock_committed' THEN
-            UPDATE public.products 
-            SET quantity = quantity + (COALESCE(payload->>'delta', payload->>'quantity'))::DECIMAL,
-                updated_at = NEW.client_timestamp
-            WHERE id = COALESCE(payload->>'productId', payload->>'id');
+            INSERT INTO public.products (id, business_id, name, quantity, updated_at)
+            VALUES (
+                COALESCE(payload->>'productId', payload->>'id'),
+                NEW.business_id,
+                'Pending Sync...',
+                (COALESCE(payload->>'delta', payload->>'quantity', '0'))::DECIMAL,
+                NEW.client_timestamp
+            )
+            ON CONFLICT (id) DO UPDATE SET 
+                quantity = products.quantity + EXCLUDED.quantity,
+                updated_at = EXCLUDED.updated_at;
 
             INSERT INTO public.inventory_ledger (id, business_id, product_id, action, quantity, recorded_at)
             VALUES (
@@ -840,20 +847,34 @@ BEGIN
             ) ON CONFLICT (id) DO NOTHING;
 
         WHEN 'STOCK_RESTORED' THEN
-            UPDATE public.products 
-            SET quantity = quantity + (payload->>'delta')::DECIMAL,
-                updated_at = NEW.client_timestamp
-            WHERE id = COALESCE(payload->>'productId', payload->>'id');
+            INSERT INTO public.products (id, business_id, name, quantity, updated_at)
+            VALUES (
+                COALESCE(payload->>'productId', payload->>'id'),
+                NEW.business_id,
+                'Pending Sync...',
+                (COALESCE(payload->>'delta', '0'))::DECIMAL,
+                NEW.client_timestamp
+            )
+            ON CONFLICT (id) DO UPDATE SET 
+                quantity = products.quantity + EXCLUDED.quantity,
+                updated_at = EXCLUDED.updated_at;
 
             INSERT INTO public.inventory_ledger (id, business_id, product_id, action, quantity, recorded_at)
             VALUES (NEW.event_id || '_LEDGER', NEW.business_id, COALESCE(payload->>'productId', payload->>'id'), 'VOID', (payload->>'delta')::DECIMAL, NEW.client_timestamp)
             ON CONFLICT (id) DO NOTHING;
 
         WHEN 'INVENTORY_AUDITED' THEN
-            UPDATE public.products 
-            SET quantity = (payload->>'physicalCount')::DECIMAL,
-                updated_at = NEW.client_timestamp
-            WHERE id = COALESCE(payload->>'productId', payload->>'id');
+            INSERT INTO public.products (id, business_id, name, quantity, updated_at)
+            VALUES (
+                COALESCE(payload->>'productId', payload->>'id'),
+                NEW.business_id,
+                'Pending Sync...',
+                (COALESCE(payload->>'physicalCount', '0'))::DECIMAL,
+                NEW.client_timestamp
+            )
+            ON CONFLICT (id) DO UPDATE SET 
+                quantity = EXCLUDED.quantity,
+                updated_at = EXCLUDED.updated_at;
 
             INSERT INTO public.inventory_ledger (id, business_id, product_id, action, quantity, recorded_at)
             VALUES (NEW.event_id || '_LEDGER', NEW.business_id, COALESCE(payload->>'productId', payload->>'id'), 'AUDIT', (payload->>'variance')::DECIMAL, NEW.client_timestamp)
@@ -998,13 +1019,20 @@ BEGIN
                 COALESCE(payload->>'paymentStatus', 'paid')
             ) ON CONFLICT (id) DO NOTHING;
 
-            -- Materialize Restocking for Purchase
+            -- Materialize Restocking for Purchase (Hardened with Upsert for Ghost Products)
             IF payload ? 'items' THEN
                 FOR v_item IN SELECT * FROM jsonb_array_elements(payload->'items') LOOP
-                    UPDATE public.products 
-                    SET quantity = quantity + (v_item->>'quantity')::DECIMAL,
-                        updated_at = NEW.client_timestamp
-                    WHERE id = v_item->>'productId';
+                    INSERT INTO public.products (id, business_id, name, quantity, updated_at)
+                    VALUES (
+                        v_item->>'productId',
+                        NEW.business_id,
+                        'Pending Sync...',
+                        (v_item->>'quantity')::DECIMAL,
+                        NEW.client_timestamp
+                    )
+                    ON CONFLICT (id) DO UPDATE SET 
+                        quantity = products.quantity + EXCLUDED.quantity,
+                        updated_at = EXCLUDED.updated_at;
 
                     INSERT INTO public.inventory_ledger (id, business_id, product_id, action, quantity, recorded_at)
                     VALUES (
