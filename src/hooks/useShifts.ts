@@ -41,6 +41,10 @@ export function useShifts() {
       syncStatus: 'pending'
     };
 
+    const bId = businessId;
+    if (!business || !bId) return;
+    const bCode = business.code;
+
     await db.transaction('rw', [db.shifts, db.pos_events, db.counters, db.settings], async () => {
       await db.shifts.add(newShift);
       
@@ -49,8 +53,8 @@ export function useShifts() {
 
       // Sync
       await db.pos_events.add({
-        event_id: await generateTraceableId('EVT', businessId, business?.code, deviceId),
-        business_id: businessId,
+        event_id: await generateTraceableId('EVT', bId, bCode, deviceId),
+        business_id: bId,
         staff_id: staffId,
         event_type: 'SHIFT_STARTED',
         payload,
@@ -74,6 +78,10 @@ export function useShifts() {
       status: 'completed'
     };
 
+    const bId = activeShift.businessId;
+    if (!business) return;
+    const bCode = business.code;
+
     await db.transaction('rw', [db.shifts, db.pos_events, db.counters, db.settings], async () => {
       await db.shifts.put(updatedShift);
 
@@ -83,8 +91,8 @@ export function useShifts() {
 
       // Sync
       await db.pos_events.add({
-        event_id: await generateTraceableId('EVT', activeShift.businessId, business?.code, deviceId),
-        business_id: activeShift.businessId,
+        event_id: await generateTraceableId('EVT', bId, bCode, deviceId),
+        business_id: bId,
         staff_id: activeShift.staffId,
         event_type: 'SHIFT_ENDED',
         payload,
@@ -120,6 +128,10 @@ export function useShifts() {
       mpesaSales: Math.round((activeShift.mpesaSales + mpesaDelta) * 100) / 100,
     };
 
+    const bId = activeShift.businessId;
+    if (!business) return;
+    const bCode = business.code;
+
     await db.transaction('rw', [db.shifts, db.pos_events, db.counters, db.settings], async () => {
       await db.shifts.put(updatedShift);
       
@@ -128,8 +140,8 @@ export function useShifts() {
       const deviceId = await getDeviceId();
 
       await db.pos_events.add({
-        event_id: await generateTraceableId('EVT', activeShift.businessId, business!.code, deviceId),
-        business_id: activeShift.businessId,
+        event_id: await generateTraceableId('EVT', bId, bCode, deviceId),
+        business_id: bId,
         staff_id: activeShift.staffId,
         event_type: 'SHIFT_UPDATED',
         payload,
@@ -164,22 +176,28 @@ export function useShifts() {
       mpesaSales: Math.round((activeShift.mpesaSales - mpesaDelta) * 100) / 100,
     };
 
-    await db.shifts.put(updatedShift);
-    
-    const payload = updatedShift;
-    const eventHash = await generateEventHash(payload);
-    const deviceId = await getDeviceId();
+    const bId = activeShift.businessId;
+    if (!business) return;
+    const bCode = business.code;
 
-    await db.pos_events.add({
-      event_id: await generateTraceableId('EVT', activeShift.businessId, business!.code, deviceId),
-      business_id: activeShift.businessId,
-      staff_id: activeShift.staffId,
-      event_type: 'SHIFT_UPDATED',
-      payload,
-      client_timestamp: Date.now(),
-      server_timestamp: 0,
-      hash: eventHash,
-      sync_status: 'pending'
+    await db.transaction('rw', [db.shifts, db.pos_events, db.counters, db.settings], async () => {
+      await db.shifts.put(updatedShift);
+      
+      const payload = updatedShift;
+      const eventHash = await generateEventHash(payload);
+      const deviceId = await getDeviceId();
+
+      await db.pos_events.add({
+        event_id: await generateTraceableId('EVT', bId, bCode, deviceId),
+        business_id: bId,
+        staff_id: activeShift.staffId,
+        event_type: 'SHIFT_UPDATED',
+        payload,
+        client_timestamp: Date.now(),
+        server_timestamp: 0,
+        hash: eventHash,
+        sync_status: 'pending'
+      });
     });
   };
 
@@ -191,6 +209,10 @@ export function useShifts() {
       totalExpenses: Math.round((activeShift.totalExpenses + amount) * 100) / 100,
     };
 
+    const bId = activeShift.businessId;
+    if (!business) return;
+    const bCode = business.code;
+
     await db.transaction('rw', [db.shifts, db.pos_events, db.counters, db.settings], async () => {
       await db.shifts.put(updatedShift);
       
@@ -199,8 +221,8 @@ export function useShifts() {
       const deviceId = await getDeviceId();
 
       await db.pos_events.add({
-        event_id: await generateTraceableId('EVT', activeShift.businessId, business?.code, deviceId),
-        business_id: activeShift.businessId,
+        event_id: await generateTraceableId('EVT', bId, bCode, deviceId),
+        business_id: bId,
         staff_id: activeShift.staffId,
         event_type: 'SHIFT_UPDATED',
         payload,

@@ -109,9 +109,18 @@ export function useSales() {
     const totalCost = Math.round(cart.reduce((sum, item) => sum + item.costPrice * item.quantity, 0) * 100) / 100;
     const totalProfit = Math.round((total - taxAmount - totalCost) * 100) / 100;
     
+    if (!business || !businessId) {
+      alert('Business context not fully loaded. Please wait a moment.');
+      return { success: false, error: 'BUSINESS_CONTEXT_MISSING' };
+    }
+
+    // Capture stable references for closure type safety
+    const bId = businessId;
+    const bCode = business.code;
+
     const timestamp = Date.now();
     const deviceId = await getDeviceId();
-    const saleId = await generateTraceableId('ORD', businessId, business?.code, deviceId);
+    const saleId = await generateTraceableId('ORD', bId, bCode, deviceId);
     const receiptId = saleId; 
 
     const saleItems = cart.map(item => ({
@@ -143,8 +152,8 @@ export function useSales() {
         const saleHash = await generateEventHash(salePayload);
 
         const saleEvent = {
-          event_id: await generateTraceableId('EVT', businessId, business?.code, deviceId),
-          business_id: businessId,
+          event_id: await generateTraceableId('EVT', bId, bCode, deviceId),
+          business_id: bId,
           staff_id: staffId || 'UNKNOWN',
           event_type: 'SALE_CREATED' as const,
           payload: salePayload,
@@ -190,8 +199,8 @@ export function useSales() {
               const stockHash = await generateEventHash(stockPayload);
 
               await db.pos_events.add({
-                event_id: await generateTraceableId('EVT', businessId, business!.code, deviceId),
-                business_id: businessId,
+                event_id: await generateTraceableId('EVT', bId, bCode, deviceId),
+                business_id: bId,
                 staff_id: staffId || 'UNKNOWN',
                 event_type: 'STOCK_RESERVED',
                 payload: stockPayload,
@@ -207,8 +216,8 @@ export function useSales() {
               });
 
               await db.inventory_ledger.add({
-                id: await generateTraceableId('INV', businessId, business!.code, deviceId),
-                businessId: businessId,
+                id: await generateTraceableId('INV', bId, bCode, deviceId),
+                businessId: bId,
                 productId: item.id,
                 action: 'SALE',
                 quantity: -item.quantity,
@@ -219,9 +228,9 @@ export function useSales() {
 
             await recordSaleToShift(total, paymentMethod, splitPayments);
             
-        if (business!.status === 'suspended') {
-          await db.businesses.update(businessId, {
-            suspendedRevenueCount: (business!.suspendedRevenueCount || 0) + 1
+        if (business.status === 'suspended') {
+          await db.businesses.update(bId, {
+            suspendedRevenueCount: (business.suspendedRevenueCount || 0) + 1
           });
         }
       });
@@ -236,6 +245,8 @@ export function useSales() {
 
   const voidSale = useCallback(async (saleId: string, reason: string) => {
     if (!businessId || !business) return;
+    const bId = businessId;
+    const bCode = business.code;
 
     const sale = await db.sales.get(saleId);
     if (!sale || sale.status === 'voided') return;
@@ -256,8 +267,8 @@ export function useSales() {
             });
 
             await db.inventory_ledger.add({
-              id: await generateTraceableId('INV', businessId, business?.code, deviceId),
-              businessId: businessId,
+              id: await generateTraceableId('INV', bId, bCode, deviceId),
+              businessId: bId,
               productId: item.productId,
               action: 'VOID',
               quantity: item.quantity,
@@ -268,8 +279,8 @@ export function useSales() {
             const stockPayload = { productId: item.productId, delta: item.quantity, reason: 'VOID' };
             const stockHash = await generateEventHash(stockPayload);
             await db.pos_events.add({
-              event_id: await generateTraceableId('EVT', businessId, business?.code, deviceId),
-              business_id: businessId,
+              event_id: await generateTraceableId('EVT', bId, bCode, deviceId),
+              business_id: bId,
               staff_id: staffId || 'OWNER',
               event_type: 'STOCK_RESTORED',
               payload: stockPayload,
@@ -286,8 +297,8 @@ export function useSales() {
         const voidPayload = { saleId, reason };
         const voidHash = await generateEventHash(voidPayload);
         await db.pos_events.add({
-          event_id: await generateTraceableId('EVT', businessId, business?.code, deviceId),
-          business_id: businessId,
+          event_id: await generateTraceableId('EVT', bId, bCode, deviceId),
+          business_id: bId,
           staff_id: staffId || 'OWNER',
           event_type: 'SALE_VOIDED',
           payload: voidPayload,

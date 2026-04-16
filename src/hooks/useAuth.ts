@@ -11,7 +11,8 @@ export function useAuth() {
   });
   const [bizIdState, setBizIdState] = useState(() => localStorage.getItem('biz_id'));
   const [staffIdState, setStaffIdState] = useState(() => localStorage.getItem('staff_id'));
-  const [isLoading, setIsLoading] = useState(!bizIdState && !staffIdState);
+  const [sessionLoading, setSessionLoading] = useState(true);
+  const [manualLoading, setManualLoading] = useState(false);
 
   const currentBusiness = useLiveQuery(
     async () => bizIdState ? await db.businesses.get(bizIdState) : null,
@@ -23,6 +24,25 @@ export function useAuth() {
     [staffIdState]
   );
 
+  // Derived loading state: true if session is still resolving OR if a manual action is in progress OR if a known ID is still fetching its record
+  const isLoading = sessionLoading || manualLoading || 
+    (bizIdState && currentBusiness === undefined) || 
+    (staffIdState && currentStaff === undefined);
+
+  const isOptimisticReady = !!bizIdState || !!staffIdState;
+
+  // Diagnostic logging to identify hangs
+  useEffect(() => {
+    if (isLoading) {
+      const timer = setTimeout(() => {
+        console.warn('[Auth] Loading hang detected. State:', { sessionLoading, manualLoading, bizId: !!bizIdState, bizLoaded: currentBusiness !== undefined });
+      }, 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [isLoading, sessionLoading, manualLoading, bizIdState, currentBusiness]);
+  
+  const setIsLoading = setManualLoading; 
+
   const branches = useLiveQuery(
     async () => bizIdState ? await db.branches.where('businessId').equals(bizIdState).toArray() : [],
     [bizIdState]
@@ -30,28 +50,46 @@ export function useAuth() {
 
   // Persistence & Session Recovery
   useEffect(() => {
-    async function loadSession() {
-      const storedBizId = localStorage.getItem('biz_id');
-      const storedStaffId = localStorage.getItem('staff_id');
-      
-      const { data: { session } } = await supabase.auth.getSession();
-      
-      if (storedStaffId) {
-        setStaffIdState(storedStaffId);
-        setUserType('staff');
-      } else if (session) {
-        setBizIdState(session.user.id);
-        setUserType('owner');
-      } else if (storedBizId) {
-        setBizIdState(storedBizId);
-        setUserType('owner');
+    let mounted = true;
+    
+    // Safety Timeout: Release UI lock after 8s regardless of network/DB status
+    const safetyTimer = setTimeout(() => {
+      if (mounted && sessionLoading) {
+        console.error('[Auth] Session recovery timed out. Force-releasing loading state.');
+        setSessionLoading(false);
       }
+    }, 8000);
 
-      // If we didn't show the dashboard optimistically, show it now
-      setIsLoading(false);
+    async function loadSession() {
+      try {
+        const storedBizId = localStorage.getItem('biz_id');
+        const storedStaffId = localStorage.getItem('staff_id');
+        
+        const { data: { session } } = await supabase.auth.getSession();
+        
+        if (storedStaffId) {
+          setStaffIdState(storedStaffId);
+          setUserType('staff');
+        } else if (session) {
+          setBizIdState(session.user.id);
+          setUserType('owner');
+        } else if (storedBizId) {
+          setBizIdState(storedBizId);
+          setUserType('owner');
+        }
+      } catch (err) {
+        console.error('[Auth] Critical failure during session recovery:', err);
+      } finally {
+        if (mounted) {
+          setSessionLoading(false);
+          clearTimeout(safetyTimer);
+        }
+      }
     }
+
     loadSession();
-  }, []);
+    return () => { mounted = false; clearTimeout(safetyTimer); };
+  }, [sessionLoading]);
 
   const provisionBusiness = async (token: string, name: string, pin: string, email: string) => {
     setIsLoading(true);
@@ -364,6 +402,7 @@ export function useAuth() {
     branchId,
     staffId,
     isLoading, 
+    isOptimisticReady,
     businessLogin, 
     staffLogin, 
     provisionBusiness, 

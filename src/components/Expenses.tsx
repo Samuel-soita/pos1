@@ -15,6 +15,7 @@ import { QuickLog } from './expenses/QuickLog';
 import { RecurringExpenses } from './expenses/RecurringExpenses';
 import { AddExpenseModal } from './expenses/AddExpenseModal';
 import { StatsCard } from './shared/StatsCard';
+import { TableSkeleton } from './LoadingSkeleton';
 
 export function Expenses({ initialView }: { initialView?: string }) {
   const { businessId, business } = useAuth();
@@ -45,16 +46,17 @@ export function Expenses({ initialView }: { initialView?: string }) {
 
   const onAddExpense = async (formData: { title: string; amount: number; category: string; receiptImage: string | null }) => {
     requestAuth(async () => {
+      if (!business || !businessId) return;
       const now = Date.now();
       const deviceId = await getDeviceId();
       await db.transaction('rw', [db.expenses, db.pos_events, db.counters, db.settings, db.shifts], async () => {
         await recordExpenseToShift(formData.amount);
-        const id = await generateTraceableId('EXP', businessId!, business!.code, deviceId);
+        const id = await generateTraceableId('EXP', businessId, business.code, deviceId);
         const newExpense = {
           ...formData,
           receiptImage: formData.receiptImage || undefined,
           id,
-          businessId: businessId!,
+          businessId: businessId,
           description: '',
           timestamp: now,
           status: (isOwner ? 'verified' : 'pending') as 'verified' | 'pending',
@@ -63,8 +65,8 @@ export function Expenses({ initialView }: { initialView?: string }) {
         await db.expenses.add(newExpense);
         const eventHash = await generateEventHash(newExpense);
         await db.pos_events.add({
-          event_id: await generateTraceableId('EVT', businessId!, business!.code, deviceId),
-          business_id: businessId!,
+          event_id: await generateTraceableId('EVT', businessId, business.code, deviceId),
+          business_id: businessId,
           staff_id: 'owner',
           event_type: 'EXPENSE_CREATED',
           payload: newExpense,
@@ -80,6 +82,7 @@ export function Expenses({ initialView }: { initialView?: string }) {
 
   const onVerify = useCallback(async (id: string, status: 'verified' | 'rejected') => {
     requestAuth(async () => {
+      if (!business || !businessId) return;
       const now = Date.now();
       await db.transaction('rw', [db.expenses, db.pos_events, db.counters, db.settings], async () => {
         await db.expenses.update(id, { status, verifiedAt: now, verifiedBy: 'owner' });
@@ -87,8 +90,8 @@ export function Expenses({ initialView }: { initialView?: string }) {
         const deviceId = await getDeviceId();
         const eventHash = await generateEventHash(updated);
         await db.pos_events.add({
-          event_id: await generateTraceableId('EVT', businessId!, business!.code, deviceId),
-          business_id: businessId!,
+          event_id: await generateTraceableId('EVT', businessId, business.code, deviceId),
+          business_id: businessId,
           staff_id: 'owner',
           event_type: 'EXPENSE_UPDATED',
           payload: updated,
@@ -104,6 +107,7 @@ export function Expenses({ initialView }: { initialView?: string }) {
 
   const onDelete = useCallback(async (id: string) => {
     requestAuth(async () => {
+      if (!business || !businessId) return;
       if (confirm('Are you sure you want to delete this expense?')) {
         const now = Date.now();
         const deviceId = await getDeviceId();
@@ -112,8 +116,8 @@ export function Expenses({ initialView }: { initialView?: string }) {
           const payload = { id };
           const eventHash = await generateEventHash(payload);
           await db.pos_events.add({
-            event_id: await generateTraceableId('EVT', businessId!, business!.code, deviceId),
-            business_id: businessId!,
+            event_id: await generateTraceableId('EVT', businessId, business.code, deviceId),
+            business_id: businessId,
             staff_id: 'owner',
             event_type: 'EXPENSE_DELETED',
             payload,
@@ -129,13 +133,14 @@ export function Expenses({ initialView }: { initialView?: string }) {
   }, [businessId, business, requestAuth]);
 
   const onAddRecurring = async (formData: { title: string; amount: string; category: string; frequency: 'daily' | 'weekly' | 'monthly' }) => {
+    if (!business || !businessId) return;
     const now = Date.now();
     const deviceId = await getDeviceId();
-    const id = await generateTraceableId('EXP', businessId!, business!.code, deviceId);
+    const id = await generateTraceableId('EXP', businessId, business.code, deviceId);
     const newRec = { 
       ...formData, 
       id, 
-      businessId: businessId!, 
+      businessId: businessId, 
       amount: parseFloat(formData.amount),
       nextRun: now, 
       isActive: true, 
@@ -144,8 +149,8 @@ export function Expenses({ initialView }: { initialView?: string }) {
     await db.recurring_expenses.add(newRec);
     const eventHash = await generateEventHash(newRec);
     await db.pos_events.add({
-      event_id: await generateTraceableId('EVT', businessId!, business?.code, deviceId),
-      business_id: businessId!,
+      event_id: await generateTraceableId('EVT', businessId, business.code, deviceId),
+      business_id: businessId,
       staff_id: 'owner',
       event_type: 'RECURRING_EXPENSE_CREATED',
       payload: newRec,
@@ -158,6 +163,7 @@ export function Expenses({ initialView }: { initialView?: string }) {
   };
 
   const onToggleRecurring = async (item: RecurringExpense) => {
+    if (!business || !businessId) return;
     const newStatus = !item.isActive;
     const now = Date.now();
     const deviceId = await getDeviceId();
@@ -165,8 +171,8 @@ export function Expenses({ initialView }: { initialView?: string }) {
     const payload = { ...item, isActive: newStatus };
     const eventHash = await generateEventHash(payload);
     await db.pos_events.add({
-      event_id: await generateTraceableId('EVT', businessId!, business?.code, deviceId),
-      business_id: businessId!,
+      event_id: await generateTraceableId('EVT', businessId, business.code, deviceId),
+      business_id: businessId,
       staff_id: 'owner',
       event_type: 'RECURRING_EXPENSE_UPDATED',
       payload,
@@ -177,6 +183,18 @@ export function Expenses({ initialView }: { initialView?: string }) {
     });
     playBeep();
   };
+
+
+  if (!businessId) {
+    return (
+       <div style={{ padding: '40px', display: 'flex', flexDirection: 'column', gap: '32px' }}>
+         <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+           <h1 style={{ fontSize: '2rem', fontWeight: 800 }}>Expenses</h1>
+         </header>
+         <TableSkeleton />
+       </div>
+    );
+  }
 
   if (!isOwner) {
     return <QuickLog onSubmit={onAddExpense} />;

@@ -1,4 +1,5 @@
 import { useLiveQuery } from 'dexie-react-hooks';
+import { useCallback } from 'react';
 import { db, type CashLog } from '../db/db';
 import { useAuth } from './useAuth';
 import { generateTraceableId, getDeviceId } from '../utils/idUtils';
@@ -7,7 +8,14 @@ import { playBeep } from '../utils/audio';
 
 export function useCashControl() {
   const { businessId, business, branchId, staff } = useAuth();
-  const today = new Date().toISOString().split('T')[0];
+  const getLocalDateString = () => {
+    const d = new Date();
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+  const today = getLocalDateString();
 
   const currentLog = useLiveQuery(
     async () => {
@@ -130,7 +138,7 @@ export function useCashControl() {
     });
   };
 
-  const getZReportData = async () => {
+  const getZReportData = useCallback(async () => {
     if (!businessId) return null;
 
     const todayStart = new Date().setHours(0, 0, 0, 0);
@@ -192,11 +200,12 @@ export function useCashControl() {
       salesCount: todaySales.length,
       expensesCount: todayExpenses.length
     };
-  };
+  }, [businessId, branchId, currentLog?.openingFloat]);
 
   return {
     currentLog,
     isRegisterOpen: currentLog?.status === 'open',
+    isLoadingLog: currentLog === undefined,
     openRegister,
     closeRegister,
     getExpectedCash,

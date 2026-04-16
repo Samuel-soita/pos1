@@ -32,7 +32,7 @@ const Procurement = lazy(() => import('./components/Procurement').then(module =>
 
 function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
-  const { businessId, isLoading } = useAuth();
+  const { businessId, isLoading, isOptimisticReady } = useAuth();
   const { status } = useSubscription();
 
   // Initialize background processors
@@ -119,7 +119,7 @@ function App() {
     }
   }, [businessId]);
 
-  if (isLoading) {
+  if (isLoading && !isOptimisticReady) {
     return <LoadingSkeleton />;
   }
 

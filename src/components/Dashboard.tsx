@@ -33,7 +33,7 @@ interface ZReportData {
 export function Dashboard({ onTabChange }: { onTabChange: (tab: string) => void }) {
   const { userType, business, staff } = useAuth();
   const { getLowStockProducts } = useInventory();
-  const { isRegisterOpen, getZReportData, closeRegister, openRegister, currentLog } = useCashControl();
+  const { isRegisterOpen, getZReportData, closeRegister, openRegister, currentLog, isLoadingLog } = useCashControl();
   const { printZReport, isConnected } = usePrinter();
   const { requestAuth } = useLayout();
   
@@ -136,7 +136,7 @@ export function Dashboard({ onTabChange }: { onTabChange: (tab: string) => void 
     <div style={{ display: 'flex', flexDirection: 'column', paddingBottom: '80px' }}>
       <header style={{ padding: '40px 20px', textAlign: 'center' }}>
         <h1 style={{ fontSize: '2.5rem', fontWeight: 900, letterSpacing: '-1px', marginBottom: '8px', color: 'var(--text)' }}>
-          Hello, {displayName || 'Partner'}
+          Hello, {displayName || (business === undefined ? <span className="skeleton-box" style={{ display: 'inline-block', width: '120px', height: '32px', borderRadius: '8px', verticalAlign: 'middle' }}></span> : 'Partner')}
         </h1>
         <p style={{ fontSize: '1.1rem', color: 'var(--text-muted)', fontWeight: 500 }}>
           What would you like to manage today?
@@ -144,50 +144,76 @@ export function Dashboard({ onTabChange }: { onTabChange: (tab: string) => void 
       </header>
       
       {/* EOD Quick Status */}
-      {isRegisterOpen && zData ? (
-        <section style={{ padding: '0 20px', marginBottom: '32px' }}>
-          <div className="card" style={{ 
-            background: 'var(--bg-secondary)', 
-            border: '1px solid var(--border)',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '20px'
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div>
-                <h3 style={{ fontSize: '1.25rem', fontWeight: 900, marginBottom: '4px' }}>Shift in Progress</h3>
-                <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Opened at {new Date(currentLog?.timestamp || 0).toLocaleTimeString()}</p>
+      {isLoadingLog || (isRegisterOpen && !zData) ? (
+          <section style={{ padding: '0 20px', marginBottom: '32px' }}>
+            <div className="card" style={{ 
+              background: 'var(--bg-secondary)', 
+              border: '1px solid var(--border)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '20px'
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <h3 style={{ fontSize: '1.25rem', fontWeight: 900, marginBottom: '4px' }}>Shift in Progress</h3>
+                  <div className="skeleton-box" style={{ width: '120px', height: '14px', borderRadius: '4px' }}></div>
+                </div>
+                <div className="skeleton-box" style={{ width: '120px', height: '44px', borderRadius: 'var(--radius)' }}></div>
               </div>
-              <button 
-                onClick={() => { setActualCash(zData.expectedCash); setShowClosingModal(true); }}
-                className="btn-primary" 
-                style={{ background: 'var(--danger)', height: '44px' }}
-              >
-                <LogOut size={18} /> Close Register
-              </button>
+              <div style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', display: 'grid', gap: '16px' }}>
+                {[1, 2, 3, 4].map(i => (
+                  <div key={i} style={{ background: 'white', padding: '12px', borderRadius: '12px', border: '1px solid var(--border)' }}>
+                    <div className="skeleton-box" style={{ width: '60px', height: '12px', borderRadius: '2px', marginBottom: '8px' }}></div>
+                    <div className="skeleton-box" style={{ width: '100px', height: '20px', borderRadius: '4px' }}></div>
+                  </div>
+                ))}
+              </div>
             </div>
+          </section>
+      ) : isRegisterOpen && zData ? (
+          <section style={{ padding: '0 20px', marginBottom: '32px' }}>
+            <div className="card" style={{ 
+              background: 'var(--bg-secondary)', 
+              border: '1px solid var(--border)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '20px'
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <h3 style={{ fontSize: '1.25rem', fontWeight: 900, marginBottom: '4px' }}>Shift in Progress</h3>
+                  <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Opened at {new Date(currentLog?.timestamp || 0).toLocaleTimeString()}</p>
+                </div>
+                <button 
+                  onClick={() => { setActualCash(zData.expectedCash); setShowClosingModal(true); }}
+                  className="btn-primary" 
+                  style={{ background: 'var(--danger)', height: '44px' }}
+                >
+                  <LogOut size={18} /> Close Register
+                </button>
+              </div>
 
-            <div style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', display: 'grid', gap: '16px' }}>
-              <div style={{ background: 'white', padding: '12px', borderRadius: '12px', border: '1px solid var(--border)' }}>
-                <p style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '4px' }}>CASH SALES</p>
-                <p style={{ fontSize: '1.15rem', fontWeight: 900 }}>KES {zData.cashSales.toLocaleString()}</p>
-              </div>
-              <div style={{ background: 'white', padding: '12px', borderRadius: '12px', border: '1px solid var(--border)' }}>
-                <p style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '4px' }}>MPESA SALES</p>
-                <p style={{ fontSize: '1.15rem', fontWeight: 900 }}>KES {zData.mpesaSales.toLocaleString()}</p>
-              </div>
-              <div style={{ background: 'white', padding: '12px', borderRadius: '12px', border: '1px solid var(--border)' }}>
-                <p style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '4px' }}>EXPENSES</p>
-                <p style={{ fontSize: '1.15rem', fontWeight: 900, color: 'var(--danger)' }}>KES {zData.expenses.toLocaleString()}</p>
-              </div>
-              <div style={{ background: 'rgba(34, 197, 94, 0.1)', padding: '12px', borderRadius: '12px', border: '1px solid rgba(34, 197, 94, 0.2)' }}>
-                <p style={{ fontSize: '0.75rem', fontWeight: 700, color: '#15803d', marginBottom: '4px' }}>EXPECTED CASH</p>
-                <p style={{ fontSize: '1.15rem', fontWeight: 900, color: '#15803d' }}>KES {zData.expectedCash.toLocaleString()}</p>
+              <div style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', display: 'grid', gap: '16px' }}>
+                <div style={{ background: 'white', padding: '12px', borderRadius: '12px', border: '1px solid var(--border)' }}>
+                  <p style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '4px' }}>CASH SALES</p>
+                  <p style={{ fontSize: '1.15rem', fontWeight: 900 }}>KES {zData.cashSales.toLocaleString()}</p>
+                </div>
+                <div style={{ background: 'white', padding: '12px', borderRadius: '12px', border: '1px solid var(--border)' }}>
+                  <p style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '4px' }}>MPESA SALES</p>
+                  <p style={{ fontSize: '1.15rem', fontWeight: 900 }}>KES {zData.mpesaSales.toLocaleString()}</p>
+                </div>
+                <div style={{ background: 'white', padding: '12px', borderRadius: '12px', border: '1px solid var(--border)' }}>
+                  <p style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '4px' }}>EXPENSES</p>
+                  <p style={{ fontSize: '1.15rem', fontWeight: 900, color: 'var(--danger)' }}>KES {zData.expenses.toLocaleString()}</p>
+                </div>
+                <div style={{ background: 'rgba(34, 197, 94, 0.1)', padding: '12px', borderRadius: '12px', border: '1px solid rgba(34, 197, 94, 0.2)' }}>
+                  <p style={{ fontSize: '0.75rem', fontWeight: 700, color: '#15803d', marginBottom: '4px' }}>EXPECTED CASH</p>
+                  <p style={{ fontSize: '1.15rem', fontWeight: 900, color: '#15803d' }}>KES {zData.expectedCash.toLocaleString()}</p>
+                </div>
               </div>
             </div>
-          </div>
-        </section>
-      ) : !isRegisterOpen && (
+          </section>
+      ) : (
         <section style={{ padding: '0 20px', marginBottom: '24px' }}>
           <div className="card" style={{ 
             background: 'var(--card-gradient-primary)', 

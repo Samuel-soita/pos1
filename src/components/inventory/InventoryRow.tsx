@@ -23,10 +23,10 @@ export const InventoryRow = memo(({
 
   return (
     <tr style={{ borderBottom: '1px solid var(--border)' }}>
-      <td style={{ padding: '16px', fontWeight: 600 }} data-label="Name">{product.name}</td>
+      <td style={{ padding: '16px', fontWeight: 600 }} data-label="Name">{product.name || 'Unnamed Product'}</td>
       <td style={{ padding: '16px' }} data-label="Category">{product.category || 'General'}</td>
-      <td style={{ padding: '16px' }} data-label="Price">KES {product.price.toLocaleString()}</td>
-      <td style={{ padding: '16px', color: 'var(--text-muted)' }} data-label="Cost">KES {(product.costPrice ?? 0).toLocaleString()}</td>
+      <td style={{ padding: '16px' }} data-label="Price">KES {(Number(product.price) || 0).toLocaleString()}</td>
+      <td style={{ padding: '16px', color: 'var(--text-muted)' }} data-label="Cost">KES {(Number(product.costPrice) || 0).toLocaleString()}</td>
       <td style={{ padding: '16px' }} data-label="Stock">
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
           <button 

@@ -37,7 +37,7 @@ export function Inventory() {
   const uniqueCategories = Array.from(new Set(products.map(p => p.category || 'General'))).sort();
 
   const filteredProducts = products.filter(p => 
-    p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (p.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
     (p.barcode || '').includes(searchTerm)
   );
 
