@@ -30,9 +30,8 @@ export function useSync() {
     };
   }, []);
 
-  const pushLocalChanges = async () => {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) return; // Cannot push without cloud identity
+  const pushLocalChanges = useCallback(async () => {
+    if (!businessId) return; // Cannot push without business identity
 
     const allPendingEvents = await db.pos_events
       .where('sync_status')
@@ -50,7 +49,7 @@ export function useSync() {
       try {
         const payloadBatch = pendingBatch.map(evt => ({
           event_id: evt.event_id,
-          business_id: session.user.id,
+          business_id: businessId,
           staff_id: evt.staff_id || 'UNKNOWN',
           event_type: evt.event_type,
           payload: evt.payload,
@@ -107,14 +106,13 @@ export function useSync() {
     }
 
     await new Promise(resolve => setTimeout(resolve, 50));
-  };
+  }, [businessId]);
 
   const pullRemoteChanges = useCallback(async () => {
-    try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
+    if (!businessId) return;
 
-      const bizId = session.user.id;
+    try {
+      const bizId = businessId;
       const setting = await db.settings.get('last_synced');
       const lastSynced = (setting?.value as number) || 0;
 
@@ -128,7 +126,9 @@ export function useSync() {
           .limit(1000);
         
         if (error) throw error;
-        return data || [];
+        
+        // Final Defense: Mandatory Local Tenant Isolation Filter
+        return (data || []).filter(e => e.business_id === bizId);
       };
 
       let currentCursor = lastSynced;
@@ -509,7 +509,7 @@ export function useSync() {
     } catch (err: unknown) {
       console.error('Pull failed:', err);
     }
-  }, []);
+  }, [businessId]);
 
   /**
    * Integrity Auditor: Compares local event count with remote to detect drift.
@@ -575,20 +575,21 @@ export function useSync() {
 
     await performSync();
     await auditIntegrity();
-  }, [auditIntegrity, pullRemoteChanges]); 
+  }, [auditIntegrity, pullRemoteChanges, pushLocalChanges]); 
 
   const rebuildState = useCallback(async () => {
-    const { data: { session } } = await supabase.auth.getSession();
-    if (!session) return;
+    if (!businessId) return;
 
     setIsSyncing(true);
     try {
       await db.transaction('rw', [
         db.products, db.sales, db.expenses, db.shifts, 
         db.cash_logs, db.staff, db.branches, db.recurring_expenses, 
-        db.snapshots, db.settings, db.inventory_ledger, db.suppliers, db.purchases
+        db.snapshots, db.settings, db.inventory_ledger, db.suppliers, db.purchases,
+        db.pos_events
       ], async () => {
-        // Clear everything except events to rebuild from scratch
+        // Clear EVERYTHING for this business to rebuild a perfect source of truth
+        await db.pos_events.where('business_id').equals(businessId).delete();
         await db.products.clear();
         await db.sales.clear();
         await db.expenses.clear();
@@ -614,7 +615,7 @@ export function useSync() {
     } finally {
       setIsSyncing(false);
     }
-  }, [syncAll]);
+  }, [businessId, syncAll]);
 
   useEffect(() => {
     if (isOnline) syncAll();
