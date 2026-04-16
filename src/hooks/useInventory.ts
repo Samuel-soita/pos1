@@ -1,12 +1,12 @@
 import { useLiveQuery } from 'dexie-react-hooks';
+import { useCallback } from 'react';
 import { db, type Product } from '../db/db';
 import { generateTraceableId, getDeviceId } from '../utils/idUtils';
 import { generateEventHash } from '../utils/hashUtils';
 import { useAuth } from './useAuth';
-import { v4 as uuidv4 } from 'uuid';
 
 export function useInventory(branchFilter?: string) {
-  const { businessId, business, branchId, userType } = useAuth();
+  const { businessId, business, branchId, userType, staffId } = useAuth();
   
   const products = useLiveQuery(async () => {
     if (!businessId) return [];
@@ -24,10 +24,10 @@ export function useInventory(branchFilter?: string) {
     return await db.products.where('businessId').equals(businessId).toArray();
   }, [businessId, branchId, userType, branchFilter]) || [];
 
-  const addProduct = async (product: Omit<Product, 'id' | 'businessId' | 'updatedAt'>) => {
+  const addProduct = useCallback(async (product: Omit<Product, 'id' | 'businessId' | 'updatedAt'>) => {
     if (!businessId || !business) return;
     const deviceId = await getDeviceId();
-    const id = await generateTraceableId('PRD', businessId, business.code, deviceId);
+    const id = await generateTraceableId('PRD', businessId, business?.code, deviceId);
     const newProduct = { 
       ...product, 
       id, 
@@ -38,16 +38,26 @@ export function useInventory(branchFilter?: string) {
       syncStatus: 'pending' as const
     };
     
-    await db.transaction('rw', db.products, db.pos_events, db.counters, db.settings, async () => {
+    await db.transaction('rw', [db.products, db.pos_events, db.inventory_ledger, db.counters, db.settings], async () => {
       await db.products.add(newProduct);
       
+      await db.inventory_ledger.add({
+        id: await generateTraceableId('INV', businessId, business?.code, deviceId),
+        businessId: businessId,
+        productId: id,
+        action: 'ADD',
+        quantity: newProduct.quantity,
+        recordedAt: Date.now(),
+        syncStatus: 'synced'
+      });
+
       const payload = newProduct;
       const eventHash = await generateEventHash(payload);
       
       await db.pos_events.add({
-        event_id: await generateTraceableId('ORD', businessId, business.code, deviceId),
+        event_id: await generateTraceableId('EVT', businessId, business?.code, deviceId),
         business_id: businessId,
-        staff_id: userType === 'owner' ? 'owner' : (userType || 'unknown'),
+        staff_id: staffId || (userType === 'owner' ? 'owner' : 'unknown'),
         event_type: 'PRODUCT_CREATED',
         payload,
         client_timestamp: Date.now(),
@@ -56,17 +66,17 @@ export function useInventory(branchFilter?: string) {
         sync_status: 'pending'
       });
     });
-  };
+  }, [businessId, business, branchId, staffId, userType]);
 
   const bulkAddProducts = async (items: Array<Partial<Product>>) => {
     if (!businessId || !business) return;
 
-    await db.transaction('rw', [db.products, db.pos_events, db.counters, db.settings], async () => {
+    await db.transaction('rw', [db.products, db.pos_events, db.inventory_ledger, db.counters, db.settings], async () => {
       const deviceId = await getDeviceId();
       const now = Date.now();
 
       for (const item of items) {
-        const id = uuidv4();
+        const id = await generateTraceableId('PRD', businessId, business?.code, deviceId);
         const payload: Product = {
           id,
           businessId,
@@ -83,11 +93,22 @@ export function useInventory(branchFilter?: string) {
 
         await db.products.add(payload);
 
+        // Update Human-Readable Ledger (Local + Replicable)
+        await db.inventory_ledger.add({
+          id: await generateTraceableId('INV', businessId, business?.code, deviceId),
+          businessId,
+          productId: id,
+          action: 'ADD',
+          quantity: payload.quantity,
+          recordedAt: now,
+          syncStatus: 'synced'
+        });
+
         const eventHash = await generateEventHash(payload);
         await db.pos_events.add({
-          event_id: await generateTraceableId('PRD', businessId, business.code, deviceId),
+          event_id: await generateTraceableId('EVT', businessId, business?.code, deviceId),
           business_id: businessId,
-          staff_id: userType === 'owner' ? 'owner' : (userType || 'unknown'),
+          staff_id: staffId || 'UNKNOWN',
           event_type: 'PRODUCT_CREATED',
           payload,
           client_timestamp: now,
@@ -98,19 +119,35 @@ export function useInventory(branchFilter?: string) {
       }
     });
   };
+  const updateProduct = useCallback(async (id: string, updates: Partial<Product>) => {
+    if (!businessId || !business) return;
+    const existing = await db.products.get(id);
+    if (!existing) return;
 
-  const updateProduct = async (id: string, updates: Partial<Product>) => {
-    await db.transaction('rw', db.products, db.pos_events, db.counters, db.settings, async () => {
+    await db.transaction('rw', [db.products, db.pos_events, db.inventory_ledger, db.counters, db.settings], async () => {
       const deviceId = await getDeviceId();
       await db.products.update(id, { ...updates, updatedAt: Date.now() });
       
+      if (updates.price !== undefined && updates.price !== existing.price) {
+        await db.inventory_ledger.add({
+          id: await generateTraceableId('INV', businessId, business.code, deviceId),
+          businessId,
+          productId: id,
+          action: 'AUDIT',
+          quantity: 0,
+          recordedAt: Date.now(),
+          syncStatus: 'synced',
+          traceId: `PRICE_CHANGE_${existing.price}->${updates.price}`
+        });
+      }
+
       const payload = { id, ...updates };
       const eventHash = await generateEventHash(payload);
 
       await db.pos_events.add({
-        event_id: await generateTraceableId('PRD', businessId!, business!.code, deviceId),
-        business_id: businessId!,
-        staff_id: userType === 'owner' ? 'owner' : (userType || 'unknown'),
+        event_id: await generateTraceableId('EVT', businessId, business?.code, deviceId),
+        business_id: businessId,
+        staff_id: staffId || (userType === 'owner' ? 'owner' : 'unknown'),
         event_type: 'PRODUCT_UPDATED',
         payload,
         client_timestamp: Date.now(),
@@ -119,10 +156,11 @@ export function useInventory(branchFilter?: string) {
         sync_status: 'pending'
       });
     });
-  };
+  }, [businessId, business, staffId, userType]);
 
-  const deleteProduct = async (id: string) => {
-    await db.transaction('rw', db.products, db.pos_events, db.counters, db.settings, async () => {
+  const deleteProduct = useCallback(async (id: string) => {
+    if (!businessId || !business) return;
+    await db.transaction('rw', [db.products, db.pos_events, db.inventory_ledger, db.counters, db.settings], async () => {
       const deviceId = await getDeviceId();
       await db.products.delete(id);
       
@@ -130,9 +168,9 @@ export function useInventory(branchFilter?: string) {
       const eventHash = await generateEventHash(payload);
 
       await db.pos_events.add({
-        event_id: await generateTraceableId('PRD', businessId!, business!.code, deviceId),
-        business_id: businessId!,
-        staff_id: userType === 'owner' ? 'owner' : (userType || 'unknown'),
+        event_id: await generateTraceableId('EVT', businessId, business?.code, deviceId),
+        business_id: businessId,
+        staff_id: staffId || (userType === 'owner' ? 'owner' : 'unknown'),
         event_type: 'PRODUCT_DELETED',
         payload,
         client_timestamp: Date.now(),
@@ -141,19 +179,19 @@ export function useInventory(branchFilter?: string) {
         sync_status: 'pending'
       });
     });
-  };
+  }, [businessId, business, staffId, userType]);
 
-  const restockProduct = async (id: string, quantityToAdd: number) => {
+  const restockProduct = useCallback(async (id: string, quantityToAdd: number) => {
+    if (!businessId || !business) return;
     const product = await db.products.get(id);
     if (product) {
       await db.transaction('rw', [db.products, db.pos_events, db.inventory_ledger, db.counters, db.settings], async () => {
         const deviceId = await getDeviceId();
         await db.products.update(id, { quantity: product.quantity + quantityToAdd, updatedAt: Date.now() });
         
-        // Log event to local ledger
         const ledgerEvent = {
-          id: await generateTraceableId('INV', businessId!, business!.code, deviceId),
-          businessId: businessId!,
+          id: await generateTraceableId('INV', businessId, business?.code, deviceId),
+          businessId: businessId,
           productId: id,
           action: 'ADD' as const,
           quantity: quantityToAdd,
@@ -165,11 +203,11 @@ export function useInventory(branchFilter?: string) {
         const eventHash = await generateEventHash(ledgerEvent);
 
         await db.pos_events.add({
-          event_id: await generateTraceableId('LED', businessId!, business!.code, deviceId),
-          business_id: businessId!,
-          staff_id: userType === 'owner' ? 'owner' : (userType || 'unknown'),
+          event_id: await generateTraceableId('EVT', businessId, business?.code, deviceId),
+          business_id: businessId,
+          staff_id: staffId || (userType === 'owner' ? 'owner' : 'unknown'),
           event_type: 'INVENTORY_RESTOCKED',
-          payload: ledgerEvent,
+          payload: { productId: id, delta: quantityToAdd, action: 'ADD' },
           client_timestamp: Date.now(),
           server_timestamp: 0,
           hash: eventHash,
@@ -177,11 +215,16 @@ export function useInventory(branchFilter?: string) {
         });
       });
     }
-  };
+  }, [businessId, business, staffId, userType]);
 
-  const auditProduct = async (id: string, physicalCount: number) => {
+  const auditProduct = useCallback(async (id: string, physicalCount: number) => {
     const product = await db.products.get(id);
     if (!product || !businessId || !business) return;
+
+    if (physicalCount < 0) {
+      alert("Physical count cannot be negative.");
+      return;
+    }
 
     const variance = physicalCount - product.quantity;
     if (variance === 0) return;
@@ -190,27 +233,24 @@ export function useInventory(branchFilter?: string) {
       const deviceId = await getDeviceId();
       const now = Date.now();
 
-      // 1. Update Snapshot
       await db.products.update(id, { quantity: physicalCount, updatedAt: now });
 
-      // 2. Log to Ledger
       const ledgerEvent = {
-        id: await generateTraceableId('INV', businessId, business.code, deviceId),
+        id: await generateTraceableId('INV', businessId, business?.code, deviceId),
         businessId,
         productId: id,
         action: 'AUDIT' as const,
-        quantity: variance, // Negative means lost, Positive means found
+        quantity: variance,
         recordedAt: now,
         syncStatus: 'pending' as const
       };
       await db.inventory_ledger.add(ledgerEvent);
 
-      // 3. Log to Events (Sync)
       const eventHash = await generateEventHash(ledgerEvent);
       await db.pos_events.add({
-        event_id: await generateTraceableId('LED', businessId, business.code, deviceId),
+        event_id: await generateTraceableId('EVT', businessId, business?.code, deviceId),
         business_id: businessId,
-        staff_id: userType === 'owner' ? 'owner' : (userType || 'unknown'),
+        staff_id: staffId || 'UNKNOWN',
         event_type: 'INVENTORY_AUDITED',
         payload: { productId: id, physicalCount, variance, previousCount: product.quantity },
         client_timestamp: now,
@@ -219,10 +259,10 @@ export function useInventory(branchFilter?: string) {
         sync_status: 'pending'
       });
     });
-  };
+  }, [businessId, business, staffId]);
 
   const getLowStockProducts = () => {
-    return products.filter(p => p.quantity <= p.lowStockThreshold);
+    return products.filter(p => p.quantity <= (p.lowStockThreshold ?? 5));
   };
 
   return {

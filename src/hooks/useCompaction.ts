@@ -27,7 +27,8 @@ export function useCompaction() {
     timeField: string,
     thresholdTime: number,
     protectedIds: Set<string>,
-    dryRun: boolean
+    dryRun: boolean,
+    syncStatusField: string = 'syncStatus'
   ): Promise<CompactionResult> => {
     const res: CompactionResult = { deleted: 0, skipped: 0, errors: 0, anomalies: [] };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -35,7 +36,7 @@ export function useCompaction() {
 
     try {
       const candidates = await table
-        .where('syncStatus')
+        .where(syncStatusField)
         .equals('synced')
         .and((item: CompactionItem) => (item[timeField] as number) < thresholdTime)
         .toArray() as CompactionItem[];
@@ -93,8 +94,7 @@ export function useCompaction() {
       const thresholdTime = startTime - (COMPACTION_THRESHOLD_DAYS * MS_PER_DAY);
 
       // 1. Gather Global Protections from the new POSEvent ledger
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const pendingEvents = await (db as any).pos_events.where('sync_status').anyOf(['pending', 'failed', 'rejected_dlq']).toArray();
+      const pendingEvents = await (db.pos_events as unknown as { where: (f: string) => { anyOf: (v: string[]) => { toArray: () => Promise<Array<{ payload?: { id?: string } }>> } } }).where('sync_status').anyOf(['pending', 'failed', 'rejected_dlq']).toArray();
       
       const protectedIds = new Set([
         ...pendingEvents.map((e: { payload?: { id?: string } }) => e.payload?.id).filter(Boolean) as string[]
@@ -104,6 +104,11 @@ export function useCompaction() {
       await compactTable('sales', 'timestamp', thresholdTime, protectedIds, dryRun);
       await compactTable('cash_logs', 'timestamp', thresholdTime, protectedIds, dryRun);
       await compactTable('shifts', 'startTime', thresholdTime, protectedIds, dryRun);
+      
+      // 3. ESA Pulse Pruning (Immutable Ledger Cleanup)
+      // Note: pos_events uses 'sync_status' (snake_case)
+      await compactTable('pos_events' as 'sales', 'client_timestamp', thresholdTime, new Set(), dryRun, 'sync_status');
+      await compactTable('inventory_ledger' as 'sales', 'recordedAt', thresholdTime, new Set(), dryRun);
 
       if (!dryRun) {
         await db.settings.put({ key: 'last_compaction', value: Date.now() });

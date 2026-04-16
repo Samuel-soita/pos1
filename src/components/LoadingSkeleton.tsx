@@ -35,24 +35,22 @@ export function LoadingSkeleton() {
       </div>
       
       <div style={{ textAlign: 'center' }}>
-        <h3 className="brand-shimmer" style={{ fontSize: '1.25rem', fontWeight: 900, marginBottom: '8px' }}>SMUTA PAY</h3>
-        <p style={{ color: 'var(--text-muted)', fontSize: '0.9rem', fontWeight: 600 }}>Optimizing your experience...</p>
-      </div>
-
-      <div style={{ 
-        width: '200px', 
-        height: '4px', 
-        background: 'var(--bg-secondary)', 
-        borderRadius: '2px', 
-        overflow: 'hidden' 
-      }}>
+        <h3 className="brand-shimmer" style={{ fontSize: '1.5rem', fontWeight: 900, marginBottom: '12px', letterSpacing: '-1px' }}>SMUTA PAY</h3>
         <div style={{ 
-          width: '40%', 
-          height: '100%', 
-          background: 'var(--primary)', 
-          borderRadius: '2px',
-          animation: 'progressMove 1.5s infinite linear'
-        }}></div>
+          width: '120px', 
+          height: '2px', 
+          background: 'var(--bg-secondary)', 
+          borderRadius: '1px', 
+          margin: '0 auto',
+          overflow: 'hidden' 
+        }}>
+          <div style={{ 
+            width: '40%', 
+            height: '100%', 
+            background: 'var(--primary)', 
+            animation: 'progressMove 1.5s infinite linear'
+          }}></div>
+        </div>
       </div>
 
       <style>{`

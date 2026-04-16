@@ -13,8 +13,9 @@ import {
 import { useSync } from '../hooks/useSync';
 
 export function SyncDashboard() {
-  const { isOnline, isSyncing, syncAll } = useSync();
+  const { isOnline, isSyncing, syncAll, syncHealth, rebuildState } = useSync();
   const [selectedError, setSelectedError] = useState<string | null>(null);
+  const [isRepairing, setIsRepairing] = useState(false);
 
   // Queries for the New Event-Sourced Sync Queue
   const pendingCount = useLiveQuery(() => db.pos_events.where('sync_status').equals('pending').count()) || 0;
@@ -51,6 +52,15 @@ export function SyncDashboard() {
     
     if (isOnline) {
       syncAll();
+    }
+  };
+  
+  const handleDeepRepair = async () => {
+    if (confirm('DEEP REPAIR: This will wipe local snapshots and re-materialize your entire business state from the cloud ledger. Use this only if you see discrepancies. No data will be lost. Proceed?')) {
+      setIsRepairing(true);
+      await rebuildState();
+      setIsRepairing(false);
+      alert('Deep Repair Complete: All local data is now synchronized with the cloud ledger.');
     }
   };
 
@@ -104,13 +114,25 @@ export function SyncDashboard() {
           </div>
         </div>
 
-        <div style={{ background: rejectedEvents.length > 0 ? '#fef2f2' : '#f0fdf4', padding: '20px', borderRadius: '12px', display: 'flex', alignItems: 'center', gap: '16px', border: rejectedEvents.length > 0 ? '1px dashed var(--danger)' : '1px solid #dcfce7' }}>
-          <div style={{ background: rejectedEvents.length > 0 ? '#fee2e2' : '#dcfce7', padding: '12px', borderRadius: '50%' }}>
-            {rejectedEvents.length > 0 ? <AlertCircle size={24} color="#dc2626" /> : <CheckCircle2 size={24} color="#166534" />}
+        <div style={{ background: syncHealth < 100 ? '#fff7ed' : '#f0fdf4', padding: '20px', borderRadius: '12px', display: 'flex', alignItems: 'center', gap: '16px', border: syncHealth < 100 ? '1px dashed #f97316' : '1px solid #dcfce7' }}>
+          <div style={{ background: syncHealth < 100 ? '#ffedd5' : '#dcfce7', padding: '12px', borderRadius: '50%' }}>
+            {syncHealth < 100 ? <AlertCircle size={24} color="#f97316" /> : <CheckCircle2 size={24} color="#166534" />}
           </div>
-          <div>
-            <p style={{ fontWeight: 700, fontSize: '0.9rem', color: rejectedEvents.length > 0 ? '#b91c1c' : '#166534' }}>Stuck Events</p>
-            <h3 style={{ fontSize: '1.5rem', fontWeight: 800, color: rejectedEvents.length > 0 ? '#991b1b' : '#14532d' }}>{rejectedEvents.length}</h3>
+          <div style={{ flex: 1 }}>
+            <p style={{ fontWeight: 700, fontSize: '0.9rem', color: syncHealth < 100 ? '#c2410c' : '#166534' }}>Parity Health</p>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
+              <h3 style={{ fontSize: '1.5rem', fontWeight: 800, color: syncHealth < 100 ? '#9a3412' : '#14532d' }}>{syncHealth}%</h3>
+              {syncHealth < 100 && <span style={{ fontSize: '0.7rem', color: '#ea580c', fontWeight: 700 }}>Drift Detected</span>}
+            </div>
+            {syncHealth < 100 && (
+              <button 
+                onClick={handleDeepRepair} 
+                disabled={isRepairing}
+                style={{ background: 'transparent', border: 'none', color: '#c2410c', fontSize: '0.75rem', fontWeight: 800, padding: 0, textDecoration: 'underline', marginTop: '4px' }}
+              >
+                {isRepairing ? 'Repairing...' : 'Fix Now'}
+              </button>
+            )}
           </div>
         </div>
       </div>

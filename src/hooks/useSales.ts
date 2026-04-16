@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { db, type Product, type SplitPayment } from '../db/db';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { generateTraceableId, getDeviceId } from '../utils/idUtils';
@@ -6,6 +6,7 @@ import { generateEventHash } from '../utils/hashUtils';
 import { useAuth } from './useAuth';
 import { useCashControl } from './useCashControl';
 import { useShifts } from './useShifts';
+import { useSubscription } from './useSubscription';
 
 export interface CartItem {
   id: string;
@@ -20,6 +21,7 @@ export function useSales() {
   const { businessId, business, branchId, userType, staffId } = useAuth();
   const { isRegisterOpen } = useCashControl();
   const { recordSaleToShift, recordVoidToShift } = useShifts();
+  const { isLocked, message: subMessage } = useSubscription();
 
   const sales = useLiveQuery(async () => {
     if (!businessId) return [];
@@ -36,7 +38,7 @@ export function useSales() {
     return await query.reverse().toArray();
   }, [businessId, branchId, userType]) || [];
 
-  const addToCart = async (product: Product) => {
+  const addToCart = useCallback(async (product: Product) => {
     if (!product.id) return;
     
     // Hard Stock Lockdown
@@ -65,14 +67,17 @@ export function useSales() {
         quantity: 1 
       }];
     });
-  };
+  }, []);
 
-  const removeFromCart = (id: string) => {
+  const removeFromCart = useCallback((id: string) => {
     setCart(prev => prev.filter(item => item.id !== id));
-  };
+  }, []);
 
-  const updateCartQuantity = async (id: string, quantity: number) => {
-    if (quantity <= 0) return removeFromCart(id);
+  const updateCartQuantity = useCallback(async (id: string, quantity: number) => {
+    if (quantity <= 0) {
+      setCart(prev => prev.filter(item => item.id !== id));
+      return;
+    }
     
     // Hard Stock Lockdown
     const product = await db.products.get(id);
@@ -84,14 +89,19 @@ export function useSales() {
     setCart(prev =>
       prev.map(item => (item.id === id ? { ...item, quantity } : item))
     );
-  };
+  }, []);
 
-  const clearCart = () => setCart([]);
+  const clearCart = useCallback(() => setCart([]), []);
 
-  const completeSale = async (taxRate: number = 0, taxAmount: number = 0, paymentMethod: string = 'Cash', transactionCode?: string, splitPayments?: SplitPayment[]) => {
+  const completeSale = useCallback(async (taxRate: number = 0, taxAmount: number = 0, paymentMethod: string = 'Cash', transactionCode?: string, splitPayments?: SplitPayment[]) => {
     if (cart.length === 0 || !businessId) return;
     if (!isRegisterOpen) {
       alert('Register is closed. You must set an opening float before making sales.');
+      return;
+    }
+
+    if (isLocked) {
+      alert(subMessage || 'Subscription locked. Please renew to continue.');
       return;
     }
 
@@ -99,9 +109,18 @@ export function useSales() {
     const totalCost = Math.round(cart.reduce((sum, item) => sum + item.costPrice * item.quantity, 0) * 100) / 100;
     const totalProfit = Math.round((total - taxAmount - totalCost) * 100) / 100;
     
+    if (!business || !businessId) {
+      alert('Business context not fully loaded. Please wait a moment.');
+      return { success: false, error: 'BUSINESS_CONTEXT_MISSING' };
+    }
+
+    // Capture stable references for closure type safety
+    const bId = businessId;
+    const bCode = business.code;
+
     const timestamp = Date.now();
     const deviceId = await getDeviceId();
-    const saleId = await generateTraceableId('ORD', businessId, business!.code, deviceId);
+    const saleId = await generateTraceableId('ORD', bId, bCode, deviceId);
     const receiptId = saleId; 
 
     const saleItems = cart.map(item => ({
@@ -113,7 +132,7 @@ export function useSales() {
     }));
 
     try {
-      await db.transaction('rw', [db.products, db.sales, db.pos_events, db.snapshots, db.counters, db.settings, db.shifts], async () => {
+      await db.transaction('rw', [db.products, db.sales, db.pos_events, db.snapshots, db.counters, db.settings, db.shifts, db.inventory_ledger], async () => {
         // 1. Immutable Event Generation (Sale)
         const salePayload = {
            id: saleId,
@@ -133,10 +152,10 @@ export function useSales() {
         const saleHash = await generateEventHash(salePayload);
 
         const saleEvent = {
-          event_id: await generateTraceableId('EVT', businessId, business!.code, deviceId),
-          business_id: businessId,
+          event_id: await generateTraceableId('EVT', bId, bCode, deviceId),
+          business_id: bId,
           staff_id: staffId || 'UNKNOWN',
-          event_type: 'sale_created' as const,
+          event_type: 'SALE_CREATED' as const,
           payload: salePayload,
           client_timestamp: timestamp,
           server_timestamp: timestamp,
@@ -146,7 +165,6 @@ export function useSales() {
         await db.pos_events.add(saleEvent);
 
         // 2. Compute state change locally for instant UI response (Sales Snapshot)
-        // For backwards compatibility with standard db.sales, we map the payload to the local sales table view
         await db.sales.add({
           id: saleId,
           businessId,
@@ -163,24 +181,28 @@ export function useSales() {
           deviceId,
           branchId: branchId || undefined,
           staffId: staffId || undefined,
-          syncStatus: 'synced' // Marked synced purely for the UI. The real sync queue is pos_events.
+          syncStatus: 'synced'
         });
         
-            // 3. Immutable Event Generation (Stock)
             for (const item of cart) {
               const product = await db.products.get(item.id);
+              
               if (!product || product.quantity < item.quantity) {
-                throw new Error(`Critical: ${item.name} went out of stock during transaction!`);
+                throw new Error(`CRITICAL: ${item.name} went out of stock! Another device or tab might have sold it.`);
               }
 
-              const stockPayload = { productId: item.id, delta: -item.quantity };
+              const stockPayload = { 
+                productId: item.id, 
+                delta: -item.quantity,
+                branchId: branchId || product.branchId
+              };
               const stockHash = await generateEventHash(stockPayload);
 
               await db.pos_events.add({
-                event_id: await generateTraceableId('EVT', businessId, business!.code, deviceId),
-                business_id: businessId,
+                event_id: await generateTraceableId('EVT', bId, bCode, deviceId),
+                business_id: bId,
                 staff_id: staffId || 'UNKNOWN',
-                event_type: 'stock_reserved',
+                event_type: 'STOCK_RESERVED',
                 payload: stockPayload,
                 client_timestamp: timestamp,
                 server_timestamp: timestamp,
@@ -192,23 +214,26 @@ export function useSales() {
                 quantity: Math.round((product.quantity - item.quantity) * 100) / 100,
                 updatedAt: Date.now()
               });
+
+              await db.inventory_ledger.add({
+                id: await generateTraceableId('INV', bId, bCode, deviceId),
+                businessId: bId,
+                productId: item.id,
+                action: 'SALE',
+                quantity: -item.quantity,
+                recordedAt: timestamp,
+                syncStatus: 'synced'
+              });
             }
 
-            // 4. Update Shift (Now inside the transaction!)
             await recordSaleToShift(total, paymentMethod, splitPayments);
             
-            // 5. Update Emergency Sale Counter if suspended
-        if (business!.status === 'suspended') {
-          await db.businesses.update(businessId, {
-            suspendedRevenueCount: (business!.suspendedRevenueCount || 0) + 1
+        if (business.status === 'suspended') {
+          await db.businesses.update(bId, {
+            suspendedRevenueCount: (business.suspendedRevenueCount || 0) + 1
           });
         }
       });
-
-      // Record to active shift if applicable (Shift system needs refactor eventually but ok for now)
-      if (typeof recordSaleToShift === 'function') {
-        await recordSaleToShift(total, paymentMethod);
-      }
 
       clearCart();
       return { success: true, receiptId };
@@ -216,23 +241,23 @@ export function useSales() {
       console.error('Sale transaction failed:', error);
       return { success: false, error };
     }
-  };
+  }, [cart, businessId, isRegisterOpen, isLocked, subMessage, business, branchId, staffId, recordSaleToShift, clearCart]);
 
-  const voidSale = async (saleId: string, reason: string) => {
+  const voidSale = useCallback(async (saleId: string, reason: string) => {
     if (!businessId || !business) return;
+    const bId = businessId;
+    const bCode = business.code;
 
     const sale = await db.sales.get(saleId);
     if (!sale || sale.status === 'voided') return;
 
     try {
-      await db.transaction('rw', [db.products, db.sales, db.pos_events, db.counters, db.settings, db.shifts], async () => {
+      await db.transaction('rw', [db.products, db.sales, db.pos_events, db.counters, db.settings, db.shifts, db.inventory_ledger], async () => {
         const deviceId = await getDeviceId();
         const timestamp = Date.now();
 
-        // 1. Mark Sale as Voided
         await db.sales.update(saleId, { status: 'voided', voidReason: reason });
 
-        // 2. Restore Stock
         for (const item of sale.items) {
           const product = await db.products.get(item.productId);
           if (product) {
@@ -241,14 +266,23 @@ export function useSales() {
               updatedAt: Date.now()
             });
 
-            // Log Stock Restoration Event
+            await db.inventory_ledger.add({
+              id: await generateTraceableId('INV', bId, bCode, deviceId),
+              businessId: bId,
+              productId: item.productId,
+              action: 'VOID',
+              quantity: item.quantity,
+              recordedAt: timestamp,
+              syncStatus: 'synced'
+            });
+
             const stockPayload = { productId: item.productId, delta: item.quantity, reason: 'VOID' };
             const stockHash = await generateEventHash(stockPayload);
             await db.pos_events.add({
-              event_id: await generateTraceableId('EVT', businessId, business.code, deviceId),
-              business_id: businessId,
+              event_id: await generateTraceableId('EVT', bId, bCode, deviceId),
+              business_id: bId,
               staff_id: staffId || 'OWNER',
-              event_type: 'stock_restored',
+              event_type: 'STOCK_RESTORED',
               payload: stockPayload,
               client_timestamp: timestamp,
               server_timestamp: timestamp,
@@ -258,23 +292,21 @@ export function useSales() {
           }
         }
 
-        // 3. Log Void Event
+        await recordVoidToShift(sale.total, sale.paymentMethod, sale.splitPayments);
+
         const voidPayload = { saleId, reason };
         const voidHash = await generateEventHash(voidPayload);
         await db.pos_events.add({
-          event_id: await generateTraceableId('EVT', businessId, business.code, deviceId),
-          business_id: businessId,
+          event_id: await generateTraceableId('EVT', bId, bCode, deviceId),
+          business_id: bId,
           staff_id: staffId || 'OWNER',
-          event_type: 'sale_voided',
+          event_type: 'SALE_VOIDED',
           payload: voidPayload,
           client_timestamp: timestamp,
           server_timestamp: timestamp,
           hash: voidHash,
           sync_status: 'pending'
         });
-
-        // 4. Update Shift (Atomic!)
-        await recordVoidToShift(sale.total, sale.paymentMethod, sale.splitPayments);
       });
 
       return { success: true };
@@ -282,7 +314,7 @@ export function useSales() {
       console.error('Void failed:', error);
       return { success: false, error };
     }
-  };
+  }, [businessId, business, staffId, recordVoidToShift]);
 
   return {
     cart,

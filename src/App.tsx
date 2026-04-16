@@ -8,6 +8,7 @@ import { PaymentModal } from './components/PaymentModal';
 import { UpdateManager } from './components/UpdateManager';
 import { LoadingSkeleton } from './components/LoadingSkeleton';
 import { verifyLedgerIntegrity } from './lib/AntiCorruptionLayer';
+import { useSync } from './hooks/useSync';
 import { useCompaction } from './hooks/useCompaction';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from './db/db';
@@ -31,21 +32,27 @@ const Procurement = lazy(() => import('./components/Procurement').then(module =>
 
 function App() {
   const [activeTab, setActiveTab] = useState('dashboard');
-  const { businessId, isLoading, business, userType } = useAuth();
+  const { businessId, isLoading, isOptimisticReady } = useAuth();
   const { status } = useSubscription();
 
   // Initialize background processors
   useRecurringExpenses();
   const { compactOldData } = useCompaction();
 
+  const { rebuildState } = useSync();
+
   useEffect(() => {
     if (businessId) {
-      verifyLedgerIntegrity(businessId);
+      verifyLedgerIntegrity(businessId).then(corrupt => {
+        if (corrupt) {
+          console.warn('[ACL] Triggering state re-materialization due to integrity failure.');
+          rebuildState();
+        }
+      });
       
-      // Run Compaction Check (Debounced by 24 hours internally usually, but we call it here)
       compactOldData();
     }
-  }, [businessId, compactOldData]);
+  }, [businessId, compactOldData, rebuildState]);
 
   // First Sale Celebration Logic
   const salesCount = useLiveQuery(() => db.sales.count()) || 0;
@@ -112,7 +119,7 @@ function App() {
     }
   }, [businessId]);
 
-  if (isLoading) {
+  if (isLoading && !isOptimisticReady) {
     return <LoadingSkeleton />;
   }
 
@@ -126,15 +133,8 @@ function App() {
     );
   }
 
-  if (userType === 'owner' && !business?.packageId) {
-    return (
-      <Layout activeTab="settings" setActiveTab={setActiveTab}>
-        <Suspense fallback={<LoadingSkeleton />}>
-          <PackageSelection />
-        </Suspense>
-      </Layout>
-    );
-  }
+  // Dashboard-First Onboarding: No more hard walls for owners. 
+  // We handle plan selection via a non-intrusive banner in the dashboard.
 
   const renderContent = () => {
     switch (activeTab) {

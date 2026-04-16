@@ -656,23 +656,19 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
--- RPC: Padded Staff Code per Business (001+)
+-- RPC: Random 6-Digit Staff Code (Offline-First Parity)
 CREATE OR REPLACE FUNCTION get_next_staff_code(p_business_id UUID)
 RETURNS TEXT AS $$
 DECLARE
-    counter_id TEXT;
-    next_val INTEGER;
+    new_code TEXT;
+    is_unique BOOLEAN := FALSE;
 BEGIN
-    counter_id := 'staff_code_' || p_business_id::text;
-    
-    INSERT INTO public.system_counters (id, last_value)
-    VALUES (counter_id, 1)
-    ON CONFLICT (id) DO UPDATE 
-    SET last_value = system_counters.last_value + 1,
-        updated_at = now()
-    RETURNING last_value INTO next_val;
+    WHILE NOT is_unique LOOP
+        new_code := lpad(floor(random() * 1000000)::text, 6, '0');
+        SELECT NOT EXISTS(SELECT 1 FROM public.staff WHERE business_id = p_business_id AND code = new_code) INTO is_unique;
+    END LOOP;
 
-    RETURN lpad(next_val::text, 3, '0');
+    RETURN new_code;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
@@ -777,3 +773,317 @@ BEGIN
     RETURN 'Success: Business ' || p_business_code || ' (' || v_business_id || ') activated for ' || p_days || ' days. New expiry: ' || to_timestamp(v_new_expiry / 1000.0);
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- 14. Cloud-Side Event Materializer (Sync Parity)
+-- Ensures staff, products, sales, expenses, and ledger tables match client-side events
+CREATE OR REPLACE FUNCTION public.materialize_pos_event()
+RETURNS TRIGGER AS $$
+DECLARE
+    payload JSONB := NEW.payload;
+    v_item JSONB;
+BEGIN
+    CASE NEW.event_type
+        -- --- Products & Inventory ---
+        WHEN 'PRODUCT_CREATED', 'PRODUCT_UPDATED' THEN
+            INSERT INTO public.products (
+                id, business_id, name, price, cost_price, quantity, 
+                low_stock_threshold, category, barcode, branch_id, updated_at
+            )
+            VALUES (
+                payload->>'id',
+                NEW.business_id,
+                payload->>'name',
+                (COALESCE(payload->>'price', '0'))::DECIMAL,
+                (COALESCE(payload->>'costPrice', '0'))::DECIMAL,
+                (COALESCE(payload->>'quantity', '0'))::DECIMAL,
+                (COALESCE(payload->>'lowStockThreshold', '5'))::DECIMAL,
+                COALESCE(payload->>'category', 'General'),
+                payload->>'barcode',
+                payload->>'branchId',
+                NEW.client_timestamp
+            )
+            ON CONFLICT (id) DO UPDATE SET
+                name = EXCLUDED.name,
+                price = EXCLUDED.price,
+                cost_price = EXCLUDED.cost_price,
+                quantity = CASE WHEN NEW.event_type = 'PRODUCT_CREATED' THEN EXCLUDED.quantity ELSE products.quantity END,
+                low_stock_threshold = EXCLUDED.low_stock_threshold,
+                category = EXCLUDED.category,
+                barcode = EXCLUDED.barcode,
+                branch_id = EXCLUDED.branch_id,
+                updated_at = EXCLUDED.updated_at;
+
+            -- Ledger for Initial Stock
+            IF NEW.event_type = 'PRODUCT_CREATED' AND (payload->>'quantity')::DECIMAL > 0 THEN
+                INSERT INTO public.inventory_ledger (id, business_id, product_id, action, quantity, recorded_at)
+                VALUES (NEW.event_id || '_LEDGER', NEW.business_id, payload->>'id', 'ADD', (payload->>'quantity')::DECIMAL, NEW.client_timestamp)
+                ON CONFLICT (id) DO NOTHING;
+            END IF;
+
+        WHEN 'PRODUCT_DELETED' THEN
+            DELETE FROM public.products WHERE id = payload->>'id';
+
+        WHEN 'STOCK_RESERVED', 'INVENTORY_RESTOCKED', 'stock_committed' THEN
+            UPDATE public.products 
+            SET quantity = quantity + (COALESCE(payload->>'delta', payload->>'quantity'))::DECIMAL,
+                updated_at = NEW.client_timestamp
+            WHERE id = COALESCE(payload->>'productId', payload->>'id');
+
+            INSERT INTO public.inventory_ledger (id, business_id, product_id, action, quantity, recorded_at)
+            VALUES (
+                NEW.event_id || '_LEDGER',
+                NEW.business_id,
+                COALESCE(payload->>'productId', payload->>'id'),
+                CASE WHEN (COALESCE(payload->>'delta', payload->>'quantity'))::DECIMAL > 0 THEN 'ADD' ELSE 'SALE' END,
+                (COALESCE(payload->>'delta', payload->>'quantity'))::DECIMAL,
+                NEW.client_timestamp
+            ) ON CONFLICT (id) DO NOTHING;
+
+        WHEN 'STOCK_RESTORED' THEN
+            UPDATE public.products 
+            SET quantity = quantity + (payload->>'delta')::DECIMAL,
+                updated_at = NEW.client_timestamp
+            WHERE id = COALESCE(payload->>'productId', payload->>'id');
+
+            INSERT INTO public.inventory_ledger (id, business_id, product_id, action, quantity, recorded_at)
+            VALUES (NEW.event_id || '_LEDGER', NEW.business_id, COALESCE(payload->>'productId', payload->>'id'), 'VOID', (payload->>'delta')::DECIMAL, NEW.client_timestamp)
+            ON CONFLICT (id) DO NOTHING;
+
+        WHEN 'INVENTORY_AUDITED' THEN
+            UPDATE public.products 
+            SET quantity = (payload->>'physicalCount')::DECIMAL,
+                updated_at = NEW.client_timestamp
+            WHERE id = COALESCE(payload->>'productId', payload->>'id');
+
+            INSERT INTO public.inventory_ledger (id, business_id, product_id, action, quantity, recorded_at)
+            VALUES (NEW.event_id || '_LEDGER', NEW.business_id, COALESCE(payload->>'productId', payload->>'id'), 'AUDIT', (payload->>'variance')::DECIMAL, NEW.client_timestamp)
+            ON CONFLICT (id) DO NOTHING;
+
+        -- --- Sales ---
+        WHEN 'SALE_CREATED' THEN
+            INSERT INTO public.sales (
+                id, business_id, branch_id, staff_id, total, total_profit, 
+                timestamp, receipt_id, items, tax_rate, tax_amount, 
+                payment_method, split_payments, transaction_code, device_id
+            )
+            VALUES (
+                payload->>'id',
+                NEW.business_id,
+                payload->>'branchId',
+                NEW.staff_id,
+                (payload->>'total')::DECIMAL,
+                (payload->>'totalProfit')::DECIMAL,
+                NEW.client_timestamp,
+                payload->>'receiptId',
+                COALESCE(payload->'items', '[]'),
+                (payload->>'taxRate')::DECIMAL,
+                (payload->>'taxAmount')::DECIMAL,
+                payload->>'paymentMethod',
+                COALESCE(payload->'splitPayments', '[]'),
+                payload->>'transactionCode',
+                payload->>'deviceId'
+            ) ON CONFLICT (id) DO NOTHING;
+
+            -- Ledger Redundancy
+            IF payload ? 'items' THEN
+                INSERT INTO public.inventory_ledger (id, business_id, product_id, action, quantity, recorded_at)
+                SELECT 
+                    NEW.event_id || '_L_' || (item->>'productId'),
+                    NEW.business_id,
+                    item->>'productId',
+                    'SALE',
+                    -((item->>'quantity')::DECIMAL),
+                    NEW.client_timestamp
+                FROM jsonb_array_elements(payload->'items') AS item
+                ON CONFLICT (id) DO NOTHING;
+            END IF;
+
+        WHEN 'SALE_VOIDED' THEN
+            UPDATE public.sales 
+            SET status = 'voided'
+            WHERE id = payload->>'saleId';
+
+        -- --- Expenses ---
+        WHEN 'EXPENSE_CREATED', 'EXPENSE_UPDATED' THEN
+            INSERT INTO public.expenses (id, business_id, branch_id, title, amount, category, timestamp, status, image_url)
+            VALUES (
+                payload->>'id',
+                NEW.business_id,
+                payload->>'branchId',
+                payload->>'title',
+                (payload->>'amount')::DECIMAL,
+                payload->>'category',
+                NEW.client_timestamp,
+                COALESCE(payload->>'status', 'verified'),
+                payload->>'imageUrl'
+            ) ON CONFLICT (id) DO UPDATE SET
+                title = EXCLUDED.title,
+                amount = EXCLUDED.amount,
+                category = EXCLUDED.category,
+                status = EXCLUDED.status,
+                image_url = EXCLUDED.image_url;
+
+        WHEN 'EXPENSE_DELETED' THEN
+            DELETE FROM public.expenses WHERE id = payload->>'id';
+
+        -- --- Staff ---
+        WHEN 'STAFF_CREATED', 'STAFF_UPDATED' THEN
+            INSERT INTO public.staff (id, business_id, branch_id, code, pin, first_name, last_name, phone_number, id_number, role, status)
+            VALUES (
+                payload->>'id',
+                NEW.business_id,
+                payload->>'branchId',
+                payload->>'code',
+                payload->>'pin',
+                payload->>'firstName',
+                payload->>'lastName',
+                payload->>'phoneNumber',
+                payload->>'idNumber',
+                COALESCE(payload->>'role', 'staff'),
+                COALESCE(payload->>'status', 'active')
+            ) ON CONFLICT (id) DO UPDATE SET
+                branch_id = EXCLUDED.branch_id,
+                code = EXCLUDED.code,
+                pin = EXCLUDED.pin,
+                first_name = EXCLUDED.first_name,
+                last_name = EXCLUDED.last_name,
+                phone_number = EXCLUDED.phone_number,
+                id_number = EXCLUDED.id_number,
+                role = EXCLUDED.role,
+                status = EXCLUDED.status;
+
+        WHEN 'STAFF_DELETED' THEN
+            DELETE FROM public.staff WHERE id = payload->>'id';
+
+        -- --- Branches ---
+        WHEN 'BRANCH_CREATED', 'BRANCH_UPDATED' THEN
+            INSERT INTO public.branches (id, business_id, name, location)
+            VALUES (payload->>'id', NEW.business_id, payload->>'name', payload->>'location')
+            ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, location = EXCLUDED.location;
+
+        WHEN 'BRANCH_DELETED' THEN
+            DELETE FROM public.branches WHERE id = payload->>'id';
+
+        -- --- Suppliers & Purchases ---
+        WHEN 'SUPPLIER_CREATED', 'SUPPLIER_UPDATED' THEN
+            INSERT INTO public.suppliers (id, business_id, name, contact_person, phone, email, kra_pin)
+            VALUES (
+                payload->>'id',
+                NEW.business_id,
+                payload->>'name',
+                COALESCE(payload->>'contactPerson', payload->>'contact_person'),
+                payload->>'phone',
+                payload->>'email',
+                COALESCE(payload->>'kraPin', payload->>'kra_pin')
+            ) ON CONFLICT (id) DO UPDATE SET
+                name = EXCLUDED.name,
+                contact_person = EXCLUDED.contact_person,
+                phone = EXCLUDED.phone,
+                email = EXCLUDED.email,
+                kra_pin = EXCLUDED.kra_pin;
+
+        WHEN 'SUPPLIER_DELETED' THEN
+            DELETE FROM public.suppliers WHERE id = payload->>'id';
+
+        WHEN 'PURCHASE_CREATED' THEN
+            INSERT INTO public.purchases (id, business_id, branch_id, supplier_id, total, timestamp, items, payment_status)
+            VALUES (
+                payload->>'id',
+                NEW.business_id,
+                payload->>'branchId',
+                payload->>'supplierId',
+                (payload->>'total')::DECIMAL,
+                NEW.client_timestamp,
+                COALESCE(payload->'items', '[]'),
+                COALESCE(payload->>'paymentStatus', 'paid')
+            ) ON CONFLICT (id) DO NOTHING;
+
+            -- Materialize Restocking for Purchase
+            IF payload ? 'items' THEN
+                FOR v_item IN SELECT * FROM jsonb_array_elements(payload->'items') LOOP
+                    UPDATE public.products 
+                    SET quantity = quantity + (v_item->>'quantity')::DECIMAL,
+                        updated_at = NEW.client_timestamp
+                    WHERE id = v_item->>'productId';
+
+                    INSERT INTO public.inventory_ledger (id, business_id, product_id, action, quantity, recorded_at)
+                    VALUES (
+                        NEW.event_id || '_P_' || (v_item->>'productId'),
+                        NEW.business_id,
+                        v_item->>'productId',
+                        'ADD',
+                        (v_item->>'quantity')::DECIMAL,
+                        NEW.client_timestamp
+                    ) ON CONFLICT (id) DO NOTHING;
+                END LOOP;
+            END IF;
+
+        -- --- Shifts & Cash Logs ---
+        WHEN 'SHIFT_STARTED', 'SHIFT_UPDATED', 'SHIFT_ENDED' THEN
+            INSERT INTO public.shifts (id, business_id, staff_id, branch_id, start_time, end_time, total_sales, cash_sales, mpesa_sales, status)
+            VALUES (
+                payload->>'id',
+                NEW.business_id,
+                payload->>'staffId',
+                payload->>'branchId',
+                (payload->>'startTime')::BIGINT,
+                (payload->>'endTime')::BIGINT,
+                (payload->>'totalSales')::DECIMAL,
+                (payload->>'cashSales')::DECIMAL,
+                (payload->>'mpesaSales')::DECIMAL,
+                COALESCE(payload->>'status', 'active')
+            ) ON CONFLICT (id) DO UPDATE SET
+                end_time = EXCLUDED.end_time,
+                total_sales = EXCLUDED.total_sales,
+                cash_sales = EXCLUDED.cash_sales,
+                mpesa_sales = EXCLUDED.mpesa_sales,
+                status = EXCLUDED.status;
+
+        WHEN 'CASH_REGISTER_OPENED', 'CASH_REGISTER_CLOSED' THEN
+            INSERT INTO public.cash_logs (id, business_id, staff_id, branch_id, date, opening_float, expected_closing, actual_closing, discrepancy, timestamp, status)
+            VALUES (
+                payload->>'id',
+                NEW.business_id,
+                payload->>'staffId',
+                payload->>'branchId',
+                payload->>'date',
+                (payload->>'openingFloat')::DECIMAL,
+                (payload->>'expectedClosing')::DECIMAL,
+                (payload->>'actualClosing')::DECIMAL,
+                (payload->>'discrepancy')::DECIMAL,
+                NEW.client_timestamp,
+                COALESCE(payload->>'status', 'open')
+            ) ON CONFLICT (id) DO UPDATE SET
+                expected_closing = EXCLUDED.expected_closing,
+                actual_closing = EXCLUDED.actual_closing,
+                discrepancy = EXCLUDED.discrepancy,
+                status = EXCLUDED.status;
+
+        -- --- Settings & Business ---
+        WHEN 'SETTING_UPDATED' THEN
+            INSERT INTO public.settings (business_id, key, value, updated_at)
+            VALUES (NEW.business_id, payload->>'key', payload->'value', now())
+            ON CONFLICT (business_id, key) DO UPDATE SET value = EXCLUDED.value, updated_at = now();
+
+        WHEN 'BUSINESS_UPDATED' THEN
+            UPDATE public.businesses 
+            SET name = COALESCE(payload->>'name', name),
+                telephone = COALESCE(payload->>'telephone', telephone),
+                address = COALESCE(payload->>'address', address),
+                kra_pin = COALESCE(payload->>'kraPin', kra_pin),
+                staff_permissions = COALESCE(payload->'staffPermissions', staff_permissions)
+            WHERE id = NEW.business_id;
+
+        ELSE
+            -- Ignore other events
+    END CASE;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+DROP TRIGGER IF EXISTS trg_materialize_events ON public.pos_events;
+CREATE TRIGGER trg_materialize_events
+    AFTER INSERT ON public.pos_events
+    FOR EACH ROW
+    EXECUTE FUNCTION public.materialize_pos_event();
+

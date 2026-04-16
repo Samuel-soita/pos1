@@ -5,10 +5,12 @@ import { db } from '../db/db';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { useAuth } from '../hooks/useAuth';
 import { useSales } from '../hooks/useSales';
+import { useLayout } from '../context/LayoutContext';
 
 export function History() {
   const { business, userType } = useAuth();
   const { voidSale } = useSales();
+  const { requestAuth } = useLayout();
   const isOwner = userType === 'owner';
   
   const [searchTerm, setSearchTerm] = useState('');
@@ -20,19 +22,21 @@ export function History() {
   const [periodFilter, setPeriodFilter] = useState('Today');
   const limit = 50;
 
-  // Optimized Fetching using useLiveQuery
+  // Optimized Fetching using useLiveQuery with Deep-Search support
   const sales = useLiveQuery(async () => {
     if (!business?.id) return [];
 
-    if (periodFilter === 'Today') {
-      const todayStart = new Date().setHours(0, 0, 0, 0);
+    // 1. If searching for a specific receipt, ignore filters and search the ENTIRE DB
+    if (searchTerm) {
       return await db.sales
-        .where('timestamp').aboveOrEqual(todayStart)
+        .where('receiptId')
+        .startsWithIgnoreCase(searchTerm)
         .and(s => s.businessId === business.id)
         .reverse()
         .toArray();
     }
-    
+
+    // 2. Specific Date Filter
     if (dateFilter && periodFilter === 'Date') {
       const [year, month, day] = dateFilter.split('-').map(Number);
       const start = new Date(year, month - 1, day, 0, 0, 0, 0).getTime();
@@ -43,19 +47,23 @@ export function History() {
         .reverse()
         .toArray();
     }
+    
+    // 3. Today Filter
+    if (periodFilter === 'Today') {
+      const todayStart = new Date().setHours(0, 0, 0, 0);
+      return await db.sales
+        .where('timestamp').aboveOrEqual(todayStart)
+        .and(s => s.businessId === business.id)
+        .reverse()
+        .toArray();
+    }
 
-    // Default: Return with limit for speed
-    let results = await db.sales
+    // 4. Default: Recent Sales (Keep it fast)
+    return await db.sales
       .where('businessId').equals(business.id)
       .reverse()
       .limit(limit)
       .toArray();
-
-    if (searchTerm) {
-      results = results.filter(s => s.receiptId.toLowerCase().includes(searchTerm.toLowerCase()));
-    }
-
-    return results;
   }, [periodFilter, dateFilter, searchTerm, limit, business]) || [];
 
   const activeSales = sales.filter(s => s.status !== 'voided');
@@ -274,9 +282,13 @@ export function History() {
                   <button onClick={handlePrint} className="btn-primary" style={{ flex: 1 }}>
                     <Printer size={20} /> Print Receipt
                   </button>
-                  {isOwner && selectedSale.status !== 'voided' && (
+                  {selectedSale.status !== 'voided' && (
                     <button 
-                      onClick={() => setShowVoidConfirm(true)} 
+                      onClick={() => {
+                        requestAuth(() => {
+                          setShowVoidConfirm(true);
+                        });
+                      }} 
                       className="btn-secondary" 
                       style={{ color: 'var(--danger)', borderColor: 'var(--danger)' }}
                     >

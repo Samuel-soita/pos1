@@ -1,7 +1,9 @@
 import { useMemo, useState, useEffect } from 'react';
-import { db } from '../db/db';
+import { db, type Business } from '../db/db';
 import { useAuth } from './useAuth';
 import { useLiveQuery } from 'dexie-react-hooks';
+import { getDeviceId, generateTraceableId } from '../utils/idUtils';
+import { generateEventHash } from '../utils/hashUtils';
 
 export type SubscriptionStatus = 'trial' | 'active' | 'grace' | 'pending_payment' | 'suspended' | 'pending_verification';
 
@@ -60,7 +62,7 @@ export function useSubscription() {
     const threeDaysMs = 3 * 24 * 60 * 60 * 1000;
     const isTrial = businessStatus === 'trial';
 
-    const limitCondition = isLimitedMode ? suspendedRevenueCount >= 7 : suspendedRevenueCount >= 5; // 7 for blackout, 5 for online
+    const limitCondition = suspendedRevenueCount >= 20; // 20 emergency sales across all modes
 
     // 1. Pending Payment Flow (Trust-First)
     if (businessStatus === 'pending_payment' || businessStatus === 'pending_verification') {
@@ -119,7 +121,7 @@ export function useSubscription() {
     return {
       status: 'suspended' as SubscriptionStatus,
       daysLeft: 0,
-      message: limitReached ? 'Emergency sales limit reached. Sync required.' : `Suspended: ${isLimitedMode ? 7 - suspendedRevenueCount : 5 - suspendedRevenueCount} emergency sales left`,
+      message: limitReached ? 'Emergency sales limit reached. Sync required.' : `Suspended: ${20 - suspendedRevenueCount} emergency sales left`,
       isLocked: limitReached,
       isTrial: false,
       limitReached,
@@ -180,14 +182,104 @@ export function useSubscription() {
     const updated = current.includes(featureId) 
       ? current.filter(id => id !== featureId)
       : [...current, featureId];
-    await db.businesses.update(business.id, { enabledFeatures: updated });
+    
+    await db.transaction('rw', [db.businesses, db.pos_events, db.counters, db.settings], async () => {
+      const deviceId = await getDeviceId();
+      const nowTs = Date.now();
+      
+      await db.businesses.update(business.id, { enabledFeatures: updated });
+      
+      const payload = { ...business, enabledFeatures: updated };
+      const eventHash = await generateEventHash(payload);
+      
+      await db.pos_events.add({
+        event_id: await generateTraceableId('EVT', business.id, business?.code, deviceId),
+        business_id: business.id,
+        staff_id: 'owner',
+        event_type: 'BUSINESS_UPDATED',
+        payload,
+        client_timestamp: nowTs,
+        server_timestamp: 0,
+        hash: eventHash,
+        sync_status: 'pending'
+      });
+    });
   };
 
-  const updatePlan = async (packageId: string, features?: string[]) => {
+  const confirmPlanSelection = async (targetPackageId: string, features: string[]) => {
     if (!business) return;
-    await db.businesses.update(business.id, { 
-      packageId, 
-      enabledFeatures: features ?? business.enabledFeatures 
+    
+    await db.transaction('rw', [db.businesses, db.pos_events, db.counters, db.settings], async () => {
+      const deviceId = await getDeviceId();
+      const nowTs = Date.now();
+      
+      const updatePayload: Partial<Business> = {
+        packageId: targetPackageId,
+        enabledFeatures: features
+      };
+
+      // Trial Logic: If never used, give 5 free days and activate
+      if (!business.trialUsed) {
+        const TRIAL_DAYS = 5;
+        updatePayload.expiryDate = nowTs + TRIAL_DAYS * 24 * 60 * 60 * 1000;
+        updatePayload.status = 'trial';
+        updatePayload.trialUsed = true;
+      } else {
+        // If trial was already used, move to pending_payment (unless already active/in grace)
+        if (business.status === 'suspended') {
+           updatePayload.status = 'pending_payment';
+        }
+      }
+
+      // 1. Local Update
+      await db.businesses.update(business.id, updatePayload);
+      
+      // 2. Global Sync Event
+      const fullBusiness = { ...business, ...updatePayload };
+      const eventHash = await generateEventHash(fullBusiness);
+      
+      await db.pos_events.add({
+        event_id: await generateTraceableId('EVT', business.id, business?.code, deviceId),
+        business_id: business.id,
+        staff_id: 'owner',
+        event_type: 'BUSINESS_UPDATED',
+        payload: fullBusiness,
+        client_timestamp: nowTs,
+        server_timestamp: 0,
+        hash: eventHash,
+        sync_status: 'pending'
+      });
+    });
+  };
+
+  const requestVerification = async (transactionCode?: string) => {
+    if (!business) return;
+    
+    await db.transaction('rw', [db.businesses, db.pos_events, db.counters, db.settings], async () => {
+      const deviceId = await getDeviceId();
+      const nowTs = Date.now();
+      
+      const updatePayload: Partial<Business> = {
+        status: 'pending_verification',
+        lastPaymentRef: transactionCode
+      };
+
+      await db.businesses.update(business.id, updatePayload);
+      
+      const fullBusiness = { ...business, ...updatePayload };
+      const eventHash = await generateEventHash(fullBusiness);
+      
+      await db.pos_events.add({
+        event_id: await generateTraceableId('EVT', business.id, business?.code, deviceId),
+        business_id: business.id,
+        staff_id: 'owner',
+        event_type: 'BUSINESS_UPDATED',
+        payload: fullBusiness,
+        client_timestamp: nowTs,
+        server_timestamp: 0,
+        hash: eventHash,
+        sync_status: 'pending'
+      });
     });
   };
 
@@ -202,7 +294,8 @@ export function useSubscription() {
     modularCost,
     totalMonthly,
     toggleFeature,
-    updatePlan,
+    confirmPlanSelection,
+    requestVerification,
     enabledFeatures
   };
 }

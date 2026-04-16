@@ -16,13 +16,16 @@ export class POSReducer {
         break;
 
       case 'stock_reserved':
-      case 'stock_committed': {
+      case 'STOCK_RESERVED':
+      case 'stock_committed':
+      case 'STOCK_COMMITTED': {
         const { productId, delta } = event.payload;
         newState[productId] = (newState[productId] || 0) + delta;
         break;
       }
 
       case 'stock_restored':
+      case 'STOCK_RESTORED':
       case 'INVENTORY_RESTOCKED': {
         const { productId, delta } = event.payload;
         newState[productId] = (newState[productId] || 0) + (delta || 0);
@@ -36,6 +39,7 @@ export class POSReducer {
       }
       
       case 'sale_created':
+      case 'SALE_CREATED':
         newState.total_revenue = Math.round(((newState.total_revenue || 0) + event.payload.total) * 100) / 100;
         newState.sale_count = (newState.sale_count || 0) + 1;
         break;
@@ -49,6 +53,19 @@ export class POSReducer {
         const { productId: rejId, delta: rejDelta } = event.payload;
         if (newState[rejId] !== undefined) {
           newState[rejId] -= rejDelta;
+        }
+        break;
+      }
+
+      case 'PURCHASE_CREATED': {
+        const { items } = event.payload;
+        if (Array.isArray(items)) {
+          items.forEach((item: { productId?: string; product_id?: string; quantity?: number }) => {
+            const pid = item.productId || item.product_id;
+            if (pid) {
+              newState[pid] = (newState[pid] || 0) + (item.quantity || 0);
+            }
+          });
         }
         break;
       }
@@ -89,9 +106,9 @@ export class POSReducer {
 
     for (const event of events) {
        // Filter events relevant to this view
-       if (viewType === 'stock' && !event.event_type.startsWith('stock_') && !['PRODUCT_CREATED', 'INVENTORY_RESTOCKED', 'INVENTORY_AUDITED'].includes(event.event_type)) continue;
-       if (viewType === 'sales' && event.event_type !== 'sale_created') continue;
-       if (viewType === 'cash' && event.event_type !== 'payment_received') continue;
+        if (viewType === 'stock' && !['stock_reserved', 'STOCK_RESERVED', 'stock_committed', 'STOCK_COMMITTED', 'stock_restored', 'STOCK_RESTORED', 'PRODUCT_CREATED', 'INVENTORY_RESTOCKED', 'INVENTORY_AUDITED', 'PURCHASE_CREATED'].includes(event.event_type)) continue;
+       if (viewType === 'sales' && !['sale_created', 'SALE_CREATED'].includes(event.event_type)) continue;
+       if (viewType === 'cash' && !['payment_received', 'PAYMENT_RECEIVED'].includes(event.event_type)) continue;
 
        snapshot = POSReducer.applyEvent(snapshot, event);
     }

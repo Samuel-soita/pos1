@@ -388,7 +388,8 @@ input:focus {
 }
 
 .welcome-greeting {
-  animation: welcome-fade-in 0.8s ease-out forwards;
+  /* Animation removed for LCP performance (4.23s -> targets < 2s) */
+  opacity: 1;
 }
 
 .welcome-section {
@@ -417,6 +418,39 @@ input:focus {
 @keyframes spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
+}
+
+.skeleton-box {
+  background: #e2e8f0;
+  background: linear-gradient(
+    90deg,
+    #e2e8f0 25%,
+    #f1f5f9 50%,
+    #e2e8f0 75%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.5s infinite linear;
+}
+
+@keyframes skeleton-shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.loader {
+  width: 48px;
+  height: 48px;
+  border: 5px solid var(--bg-secondary);
+  border-bottom-color: var(--primary);
+  border-radius: 50%;
+  display: inline-block;
+  box-sizing: border-box;
+  animation: rotation 1s linear infinite;
+}
+
+@keyframes rotation {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
 }
 /* Install Banner */
 .install-banner {
