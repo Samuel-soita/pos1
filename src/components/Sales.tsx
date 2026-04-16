@@ -4,7 +4,7 @@ import { useSales } from '../hooks/useSales';
 import { useSubscription } from '../hooks/useSubscription';
 import { useAuth } from '../hooks/useAuth';
 
-import { Search, ShoppingCart, Trash2, Plus, Minus, CheckCircle, X, Banknote, Smartphone, History as HistoryIcon, ArrowLeft, Printer, Sparkles } from 'lucide-react';
+import { Search, ShoppingCart, CheckCircle, X, Banknote, Smartphone, History as HistoryIcon, ArrowLeft, Printer, Sparkles } from 'lucide-react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, type Product, type Sale } from '../db/db';
 import { usePrinter } from '../hooks/usePrinter';
@@ -15,6 +15,9 @@ import { playChime, playBeep } from '../utils/audio';
 // Lazy load heavy or secondary sub-components for instant Sales view boot
 const BarcodeScanner = lazy(() => import('./BarcodeScanner').then(m => ({ default: m.BarcodeScanner })));
 const History = lazy(() => import('./History').then(m => ({ default: m.History })));
+
+import { ProductCard } from './sales/ProductCard';
+import { CartItem } from './sales/CartItem';
 
 export function Sales() {
   const { products } = useInventory();
@@ -315,36 +318,12 @@ export function Sales() {
           paddingBottom: '24px' 
         }}>
           {filteredProducts.map(product => (
-            <div 
+            <ProductCard 
               key={product.id} 
-              className={`product-card ${glowingProductId === product.id ? 'item-glow-trigger' : ''}`} 
-              onClick={() => {
-                if (product.quantity > 0) {
-                  triggerSensoryFeedback(product.id!);
-                  addToCart(product);
-                }
-              }} 
-              style={{ 
-                cursor: product.quantity > 0 ? 'pointer' : 'not-allowed', 
-                opacity: product.quantity > 0 ? 1 : 0.6,
-                padding: '12px',
-                background: product.quantity <= product.lowStockThreshold ? '#fff1f1' : 'var(--card)',
-                borderColor: product.quantity <= product.lowStockThreshold ? '#fee2e2' : 'var(--border)'
-              }}
-            >
-              <div style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '2px' }}>{product.name}</div>
-              <div style={{ color: 'var(--primary)', fontWeight: 800, fontSize: '1rem' }}>KES {product.price.toLocaleString()}</div>
-              <div className={`stock-badge ${product.quantity <= product.lowStockThreshold ? 'stock-low' : 'stock-ok'}`} 
-                style={{ 
-                  marginTop: '6px', 
-                  fontSize: '0.7rem', 
-                  fontWeight: 800,
-                  border: product.quantity <= product.lowStockThreshold ? '1px solid var(--danger)' : 'none',
-                  animation: product.quantity <= product.lowStockThreshold ? 'pulse 2s infinite' : 'none'
-                }}>
-                Stock: {product.quantity}
-              </div>
-            </div>
+              product={product} 
+              isGlowing={glowingProductId === product.id} 
+              onSelect={handleScanProduct} 
+            />
           ))}
         </div>
       </div>
@@ -364,22 +343,12 @@ export function Sales() {
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               {cart.map(item => (
-                <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px', background: '#f8fafc', borderRadius: '10px' }}>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>{item.name}</div>
-                    <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>KES {(item.price).toLocaleString()}</div>
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', border: '1px solid var(--border)', borderRadius: '6px', overflow: 'hidden', background: 'white' }}>
-                      <button onClick={(e) => { e.stopPropagation(); updateCartQuantity(item.id, item.quantity - 1); }} style={{ padding: '2px 6px', borderRadius: 0, background: 'transparent', minHeight: '32px' }}><Minus size={12} /></button>
-                      <span style={{ padding: '0 6px', fontWeight: 600, fontSize: '0.85rem' }}>{item.quantity}</span>
-                      <button onClick={(e) => { e.stopPropagation(); updateCartQuantity(item.id, item.quantity + 1); }} style={{ padding: '2px 6px', borderRadius: 0, background: 'transparent', minHeight: '32px' }}><Plus size={12} /></button>
-                    </div>
-                    <button onClick={(e) => { e.stopPropagation(); removeFromCart(item.id); }} style={{ color: 'var(--danger)', padding: '6px', background: 'transparent', minHeight: '32px' }}>
-                      <Trash2 size={16} />
-                    </button>
-                  </div>
-                </div>
+                <CartItem 
+                  key={item.id} 
+                  item={item} 
+                  onUpdateQuantity={updateCartQuantity} 
+                  onRemove={removeFromCart} 
+                />
               ))}
             </div>
           )}
@@ -518,15 +487,15 @@ export function Sales() {
 
             {paymentMethod === 'Cash' && (
               <div style={{ marginBottom: '24px' }}>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '8px', marginBottom: '16px' }}>
-                  {[100, 200, 500, 1000].map(amt => (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '8px', marginBottom: '16px' }}>
+                  {[50, 100, 200, 500, 1000].map(amt => (
                     <button 
                       key={amt} 
                       className="btn-secondary" 
-                      style={{ padding: '12px', minHeight: '48px', fontSize: '0.9rem', border: cashAmount === amt.toString() ? '2px solid var(--primary)' : '' }}
+                      style={{ padding: '12px', minHeight: '48px', fontSize: '0.8rem', fontWeight: 800, border: cashAmount === amt.toString() ? '2px solid var(--primary)' : '' }}
                       onClick={() => setCashAmount(amt.toString())}
                     >
-                      + {amt}
+                      +{amt}
                     </button>
                   ))}
                 </div>

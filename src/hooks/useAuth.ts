@@ -4,11 +4,14 @@ import { supabase } from '../lib/supabase';
 import { useLiveQuery } from 'dexie-react-hooks';
 
 export function useAuth() {
-  const [userType, setUserType] = useState<'owner' | 'staff' | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  
+  const [userType, setUserType] = useState<'owner' | 'staff' | null>(() => {
+    if (localStorage.getItem('staff_id')) return 'staff';
+    if (localStorage.getItem('biz_id')) return 'owner';
+    return null;
+  });
   const [bizIdState, setBizIdState] = useState(() => localStorage.getItem('biz_id'));
   const [staffIdState, setStaffIdState] = useState(() => localStorage.getItem('staff_id'));
+  const [isLoading, setIsLoading] = useState(!bizIdState && !staffIdState);
 
   const currentBusiness = useLiveQuery(
     async () => bizIdState ? await db.businesses.get(bizIdState) : null,
@@ -19,6 +22,11 @@ export function useAuth() {
     async () => staffIdState ? await db.staff.get(staffIdState) : null,
     [staffIdState]
   );
+
+  const branches = useLiveQuery(
+    async () => bizIdState ? await db.branches.where('businessId').equals(bizIdState).toArray() : [],
+    [bizIdState]
+  ) || [];
 
   // Persistence & Session Recovery
   useEffect(() => {
@@ -38,6 +46,8 @@ export function useAuth() {
         setBizIdState(storedBizId);
         setUserType('owner');
       }
+
+      // If we didn't show the dashboard optimistically, show it now
       setIsLoading(false);
     }
     loadSession();
@@ -157,12 +167,12 @@ export function useAuth() {
        // If local record is missing but cloud exists, sync it down
        const { data: remoteBiz } = await supabase
          .from('businesses')
-         .select('id, name, code, pin, package_id, expiry_date, status, trial_used, suspended_revenue_count, staff_count')
+         .select('id, name, code, pin, package_id, expiry_date, status, trial_used, suspended_revenue_count, staff_count, mpesa_config, enabled_features, telephone, address, kra_pin')
          .eq('id', authData.user.id)
          .maybeSingle();
 
        if (remoteBiz) {
-          const newBiz = {
+          const newBiz: Business = {
             id: remoteBiz.id,
             name: remoteBiz.name || '',
             code: remoteBiz.code || '',
@@ -172,7 +182,12 @@ export function useAuth() {
             status: (remoteBiz.status as Business['status']) || 'active',
             trialUsed: remoteBiz.trial_used || false,
             suspendedRevenueCount: remoteBiz.suspended_revenue_count || 0,
-            staffCount: remoteBiz.staff_count || 0
+            staffCount: remoteBiz.staff_count || 0,
+            enabledFeatures: remoteBiz.enabled_features || [],
+            mpesaConfig: remoteBiz.mpesa_config || undefined,
+            telephone: remoteBiz.telephone || '',
+            address: remoteBiz.address || '',
+            kraPin: remoteBiz.kra_pin || ''
           };
           await db.businesses.put(newBiz);
           setBizIdState(newBiz.id);
@@ -184,7 +199,64 @@ export function useAuth() {
     setUserType('owner');
     localStorage.setItem('biz_id', authData.user.id);
     localStorage.setItem('pinned_biz_code', biz?.code || '');
+    
+    // Day-Zero Bootstrap: fetch essential entities immediately
+    await syncBootstrapData(authData.user.id);
+    
     return biz;
+  };
+
+  const syncBootstrapData = async (bizId: string) => {
+    try {
+      console.log('[Bootstrap] Initializing State Sync for Business:', bizId);
+      
+      // 1. Fetch Branches
+      const { data: branches } = await supabase.from('branches').select('*').eq('business_id', bizId);
+      if (branches) {
+        await db.branches.bulkPut(branches.map(b => ({
+          id: b.id,
+          businessId: b.business_id,
+          name: b.name
+        })));
+      }
+
+      // 2. Fetch All Staff
+      const { data: staff } = await supabase.from('staff').select('*').eq('business_id', bizId);
+      if (staff) {
+        await db.staff.bulkPut(staff.map(s => ({
+          id: s.id,
+          businessId: s.business_id,
+          branchId: s.branch_id,
+          code: s.code,
+          pin: s.pin,
+          firstName: s.first_name,
+          lastName: s.last_name,
+          phoneNumber: s.phone_number,
+          idNumber: s.id_number,
+          status: s.status,
+          role: s.role
+        })));
+      }
+
+      // 3. Fetch Suppliers
+      const { data: suppliers } = await supabase.from('suppliers').select('*').eq('business_id', bizId);
+      if (suppliers) {
+        await db.suppliers.bulkPut(suppliers.map(s => ({
+          id: s.id,
+          businessId: s.business_id,
+          name: s.name,
+          contactPerson: s.contact_person,
+          phone: s.phone,
+          email: s.email,
+          kraPin: s.kra_pin
+        })));
+      }
+      
+      console.log('[Bootstrap] Day-Zero State Loaded Successfully');
+    } catch (err) {
+      console.warn('[Bootstrap] Semi-failure during entity pre-fetch:', err);
+      // Non-blocking failure; the event materializer will eventually catch up
+    }
   };
 
   const staffLogin = async (staffCode: string, pin: string) => {
@@ -261,6 +333,10 @@ export function useAuth() {
     setStaffIdState(staffRecord.id);
     setUserType('staff');
     localStorage.setItem('staff_id', staffRecord.id);
+
+    // Bootstrap for staff too so they have branch context/suppliers immediately
+    await syncBootstrapData(bizId);
+
     return staffRecord;
   };
 
@@ -280,9 +356,10 @@ export function useAuth() {
   const staffId = currentStaff?.id || localStorage.getItem('staff_id');
 
   return { 
-    userType, 
+    userType,
     business: currentBusiness, 
     staff: currentStaff, 
+    branches,
     businessId,
     branchId,
     staffId,

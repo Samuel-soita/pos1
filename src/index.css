@@ -388,7 +388,8 @@ input:focus {
 }
 
 .welcome-greeting {
-  animation: welcome-fade-in 0.8s ease-out forwards;
+  /* Animation removed for LCP performance (4.23s -> targets < 2s) */
+  opacity: 1;
 }
 
 .welcome-section {

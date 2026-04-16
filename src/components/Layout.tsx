@@ -9,23 +9,29 @@ import { useShifts } from '../hooks/useShifts';
 import { usePWAUpdate } from '../hooks/usePWAUpdate';
 import { useSyncStatus } from '../hooks/useSync';
 import { 
-  X, LogOut, Lock, 
+  X, LogOut, Lock, Unlock,
   Sparkles, Home, Wallet, ArrowLeft
 } from 'lucide-react';
 import { LayoutContext, type LayoutProps } from '../context/LayoutContext';
 
-const RESTRICTED_TABS = ['dashboard', 'inventory', 'reports', 'settings', 'staff', 'procurement'];
+const RESTRICTED_TABS = ['dashboard', 'inventory', 'reports', 'settings', 'staff', 'procurement', 'expenses'];
 
 export function Layout({ children, activeTab, setActiveTab }: LayoutProps) {
   useSync();
   const { status: subStatus, daysLeft, message } = useSubscription();
   const { userType, logout, business } = useAuth();
 
-  const [isManagerUnlocked, setIsManagerUnlocked] = useState(false);
+  const [isManagerUnlocked, setIsManagerUnlocked] = useState(() => 
+    sessionStorage.getItem('pos_manager_unlocked') === 'true'
+  );
   const [showPinModal, setShowPinModal] = useState(false);
   const [pendingAction, setPendingAction] = useState<(() => void) | null>(null);
   const [showClosingModal, setShowClosingModal] = useState(false);
   const [pinInput, setPinInput] = useState('');
+
+  useEffect(() => {
+    sessionStorage.setItem('pos_manager_unlocked', isManagerUnlocked.toString());
+  }, [isManagerUnlocked]);
 
   const { isRegisterOpen, closeRegister, getExpectedCash } = useCashControl();
   const { endShift } = useShifts();
@@ -270,10 +276,22 @@ export function Layout({ children, activeTab, setActiveTab }: LayoutProps) {
               </button>
             )}
             
+            {!isManagerUnlocked && userType === 'staff' && (
+              <button 
+                onClick={() => setShowPinModal(true)}
+                className="btn-primary"
+                title="Unlock Manager Mode"
+                style={{ height: '40px', padding: '0 12px', display: 'flex', alignItems: 'center', gap: '8px', background: 'var(--success)' }}
+              >
+                <Unlock size={18} />
+                <span className="desktop-only" style={{ fontWeight: 800 }}>Unlock Manager</span>
+              </button>
+            )}
+
             <button 
               onClick={() => setIsManagerUnlocked(false)}
               className="btn-secondary"
-              title="Lock Console"
+              title="Lock Terminal"
               style={{ width: '40px', height: '40px', padding: 0, display: isManagerUnlocked ? 'flex' : 'none', alignItems: 'center', justifyContent: 'center', border: '1px solid var(--danger)', color: 'var(--danger)' }}
             >
               <Lock size={18} />
@@ -331,13 +349,13 @@ function UpdateStatus() {
   );
 }
 function SyncStatus() {
-  const { pendingCount, isOnline, isSyncing } = useSyncStatus();
+  const { pendingCount, isOnline, isSyncing, syncHealth } = useSyncStatus();
 
   if (isSyncing) {
     return (
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--warning)', fontWeight: 700, fontSize: '0.85rem' }}>
         <span style={{ fontSize: '1.2rem', animation: 'spin 2s linear infinite', display: 'inline-block' }}>🟡</span>
-        <span className="desktop-only">Saving to Cloud...</span>
+        <span className="desktop-only">Syncing...</span>
       </div>
     );
   }
@@ -352,9 +370,14 @@ function SyncStatus() {
   }
 
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--success)', fontWeight: 700, fontSize: '0.85rem' }}>
-      <span style={{ fontSize: '1.2rem' }}>🟢</span>
-      <span className="desktop-only">{pendingCount > 0 ? `${pendingCount} Items Pending` : 'Cloud Saved'}</span>
+    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: syncHealth < 100 ? 'var(--warning)' : 'var(--success)', fontWeight: 700, fontSize: '0.85rem' }}>
+      <span style={{ fontSize: '1.2rem' }}>{syncHealth < 100 ? '🟠' : '🟢'}</span>
+      <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1 }}>
+        <span className="desktop-only" style={{ fontSize: '0.75rem' }}>
+           {syncHealth < 100 ? 'Sync Discrepancy' : 'Cloud Saved'}
+        </span>
+        <span style={{ fontSize: '0.65rem', opacity: 0.8 }}>Health: {syncHealth}%</span>
+      </div>
       {pendingCount > 0 && <span className="mobile-only">({pendingCount})</span>}
     </div>
   );

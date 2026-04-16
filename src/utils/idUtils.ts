@@ -6,11 +6,12 @@ import { db } from '../db/db';
  * Example: ORD-0001-DEV-A1B2-X9F-1024
  */
 export async function generateTraceableId(
-  type: 'ORD' | 'EXP' | 'PRD' | 'STF' | 'SHIFT' | 'BRH' | 'CASH' | 'INV' | 'LED' | 'EVT' | 'SUP' | 'PUR' | 'SYS',
+  type: 'ORD' | 'EXP' | 'PRD' | 'STF' | 'SHIFT' | 'BRH' | 'CASH' | 'INV' | 'LED' | 'EVT' | 'SUP' | 'PUR' | 'SYS' | 'REC' | 'BIZ',
   businessId: string,
-  businessCode: string,
+  businessCode: string | undefined,
   deviceId: string
 ): Promise<string> {
+  const code = businessCode || 'BUS';
   const counterId = `${businessId}_${type}`;
   
   // 1. Get and update local counter
@@ -32,10 +33,19 @@ export async function generateTraceableId(
   // 4. Extract short Device ID for compact IDs
   const shortDevId = deviceId.includes('-') ? deviceId.split('-')[1] : deviceId.substring(0, 4);
 
-  return `${type}-${businessCode}-${shortDevId}-${salt}-${sequence}`;
+  return `${type}-${code}-${shortDevId}-${salt}-${sequence}`;
 }
 
 export async function getDeviceId(): Promise<string> {
   const setting = await db.settings.get('device_id');
   return (setting?.value as string) || 'UNKNOWN';
+}
+
+export function generateNumericCode(length: number): string {
+  let result = '';
+  const characters = '0123456789';
+  for (let i = 0; i < length; i++) {
+    result += characters.charAt(Math.floor(Math.random() * characters.length));
+  }
+  return result;
 }

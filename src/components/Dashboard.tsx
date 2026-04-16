@@ -4,7 +4,7 @@ import { useCashControl } from '../hooks/useCashControl';
 import { 
   ShoppingCart, Receipt, Truck,
   Package, BarChart3, Users, Settings, Lock, Unlock,
-  AlertTriangle, LogOut, CheckCircle2, X
+  AlertTriangle, LogOut, CheckCircle2, X, ShieldCheck
 } from 'lucide-react';
 import { usePrinter } from '../hooks/usePrinter';
 import { useState, useEffect } from 'react';
@@ -48,10 +48,11 @@ export function Dashboard({ onTabChange }: { onTabChange: (tab: string) => void 
   const lowStock = getLowStockProducts?.() || [];
 
   useEffect(() => {
-    if (isRegisterOpen) {
+    // Owners always see global metrics; Staff see only when register is open
+    if (userType === 'owner' || isRegisterOpen) {
       getZReportData().then(setZData);
     }
-  }, [isRegisterOpen, getZReportData]);
+  }, [isRegisterOpen, userType, getZReportData]);
 
   const displayName = userType === 'staff' ? staff?.firstName : business?.name;
 
@@ -59,7 +60,7 @@ export function Dashboard({ onTabChange }: { onTabChange: (tab: string) => void 
     { 
       id: 'sales', 
       title: 'Sales', 
-      desc: 'Process transactions & print receipts', 
+      desc: 'Process transactions & receipts', 
       icon: <ShoppingCart size={28} />, 
       gradient: 'card-gradient-primary',
       badge: isRegisterOpen ? 'Live' : undefined,
@@ -68,7 +69,7 @@ export function Dashboard({ onTabChange }: { onTabChange: (tab: string) => void 
     { 
       id: 'inventory', 
       title: 'Stocks', 
-      desc: 'Inventory & stock management', 
+      desc: 'Inventory & stock levels', 
       icon: <Package size={28} />, 
       gradient: 'card-gradient-amber',
       badge: lowStock.length > 0 ? `${lowStock.length} Alerts` : undefined,
@@ -77,29 +78,29 @@ export function Dashboard({ onTabChange }: { onTabChange: (tab: string) => void 
     { 
       id: 'purchases', 
       title: 'Purchases', 
-      desc: 'Buy and restock items', 
-      icon: <ShoppingCart size={28} />, 
+      desc: 'Buy & restock supply', 
+      icon: <Truck size={28} />, 
       gradient: 'card-gradient-success'
     },
     { 
       id: 'suppliers', 
       title: 'Suppliers', 
       desc: 'Manage your contacts', 
-      icon: <Truck size={28} />, 
-      gradient: 'card-gradient-rose'
+      icon: <Users size={28} />, 
+      gradient: 'card-gradient-slate'
     },
     { 
       id: 'reports', 
       title: 'Sales & Profit', 
       desc: 'Total Money In & Out', 
       icon: <BarChart3 size={28} />, 
-      gradient: 'card-gradient-success'
+      gradient: 'card-gradient-primary'
     },
     { 
       id: 'staff', 
       title: 'Staff Management', 
-      desc: 'Staff roles, PINs & shifts', 
-      icon: <Users size={28} />, 
+      desc: 'Staff roles & shifts', 
+      icon: <ShieldCheck size={28} />, 
       gradient: 'card-gradient-slate'
     },
     { 
@@ -112,7 +113,7 @@ export function Dashboard({ onTabChange }: { onTabChange: (tab: string) => void 
     { 
       id: 'settings', 
       title: 'Settings', 
-      desc: 'Business profile & POS config', 
+      desc: 'Business profile & POS', 
       icon: <Settings size={28} />, 
       gradient: 'card-gradient-slate'
     }
@@ -133,11 +134,15 @@ export function Dashboard({ onTabChange }: { onTabChange: (tab: string) => void 
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', paddingBottom: '80px' }}>
-      <header className="welcome-section welcome-greeting">
-        <h1 className="welcome-title">Hello, {displayName || 'Partner'}</h1>
-        <p className="welcome-subtitle">What would you like to manage today?</p>
+      <header style={{ padding: '40px 20px', textAlign: 'center' }}>
+        <h1 style={{ fontSize: '2.5rem', fontWeight: 900, letterSpacing: '-1px', marginBottom: '8px', color: 'var(--text)' }}>
+          Hello, {displayName || 'Partner'}
+        </h1>
+        <p style={{ fontSize: '1.1rem', color: 'var(--text-muted)', fontWeight: 500 }}>
+          What would you like to manage today?
+        </p>
       </header>
-
+      
       {/* EOD Quick Status */}
       {isRegisterOpen && zData ? (
         <section style={{ padding: '0 20px', marginBottom: '32px' }}>
@@ -183,29 +188,30 @@ export function Dashboard({ onTabChange }: { onTabChange: (tab: string) => void 
           </div>
         </section>
       ) : !isRegisterOpen && (
-        <section style={{ padding: '0 20px', marginBottom: '32px' }}>
+        <section style={{ padding: '0 20px', marginBottom: '24px' }}>
           <div className="card" style={{ 
             background: 'var(--card-gradient-primary)', 
             color: 'white',
             display: 'flex',
-            flexDirection: 'column',
+            justifyContent: 'space-between',
             alignItems: 'center',
-            textAlign: 'center',
-            padding: '40px 20px',
+            padding: '24px',
             gap: '16px',
-            boxShadow: '0 20px 25px -5px rgba(37, 99, 235, 0.2)'
+            boxShadow: '0 10px 15px -3px rgba(37, 99, 235, 0.2)'
           }}>
-            <div style={{ background: 'rgba(255,255,255,0.2)', padding: '16px', borderRadius: '50%' }}>
-              <Unlock size={32} />
-            </div>
-            <div>
-              <h2 style={{ fontSize: '1.5rem', fontWeight: 900, marginBottom: '8px' }}>Register is Locked</h2>
-              <p style={{ opacity: 0.9, fontSize: '0.95rem' }}>Start your business day to begin recording sales and tracking revenue.</p>
+            <div style={{ display: 'flex', gap: '16px', alignItems: 'center', textAlign: 'left' }}>
+              <div style={{ background: 'rgba(255,255,255,0.2)', padding: '10px', borderRadius: '12px' }}>
+                <Unlock size={24} />
+              </div>
+              <div>
+                <h2 style={{ fontSize: '1.1rem', fontWeight: 900, margin: 0 }}>Register Locked</h2>
+                <p style={{ opacity: 0.9, fontSize: '0.8rem', margin: 0 }}>Start your business day to record sales.</p>
+              </div>
             </div>
             <button 
               onClick={() => setShowOpeningModal(true)}
               className="btn-primary" 
-              style={{ background: 'white', color: 'var(--primary)', border: 'none', height: '56px', padding: '0 40px', fontSize: '1.1rem', fontWeight: 800 }}
+              style={{ background: 'white', color: 'var(--primary)', border: 'none', height: '44px', padding: '0 20px', fontSize: '0.9rem', fontWeight: 800, flexShrink: 0 }}
             >
               Open Register
             </button>

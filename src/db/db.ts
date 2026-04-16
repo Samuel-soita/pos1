@@ -7,11 +7,12 @@ export interface Product {
   price: number;
   costPrice?: number;
   quantity: number;
-  lowStockThreshold: number;
+  lowStockThreshold?: number;
   updatedAt: number;
   category?: string;
   barcode?: string;
   branchId?: string;
+  syncStatus?: 'pending' | 'synced' | 'failed';
 }
 
 export interface Counter {
@@ -55,6 +56,7 @@ export interface Branch {
   businessId: string;
   name: string;
   location?: string;
+  syncStatus?: 'pending' | 'synced' | 'failed';
 }
 
 export interface Shift {
@@ -67,6 +69,7 @@ export interface Shift {
   totalSales: number;
   cashSales: number;
   mpesaSales: number;
+  totalExpenses: number;
   status: 'active' | 'completed';
   syncStatus?: 'pending' | 'synced' | 'failed';
 }
@@ -124,6 +127,7 @@ export interface Purchase {
   timestamp: number;
   items: Array<{ productId: string; name: string; quantity: number; price: number }>;
   paymentStatus: 'paid' | 'pending' | 'partial';
+  branchId?: string;
   syncStatus?: 'pending' | 'synced' | 'failed';
 }
 
@@ -190,6 +194,11 @@ export interface Business {
   enabledFeatures?: string[];
   staffPermissions?: Record<string, boolean>;
   businessType?: 'sole_proprietor' | 'multi_branch';
+  mpesaConfig?: {
+    payout_destination: string;
+    convenience_fee: number;
+    is_enabled: boolean;
+  };
 }
 
 export interface Staff {
@@ -203,6 +212,7 @@ export interface Staff {
   lastName: string;
   status: 'active' | 'inactive';
   branchId?: string;
+  syncStatus?: 'pending' | 'synced' | 'failed';
 }
 
 export interface Setting {
@@ -214,7 +224,7 @@ export interface InventoryLedgerEvent {
   id: string; // trace ID
   businessId: string;
   productId: string;
-  action: 'ADD' | 'SALE' | 'REFUND' | 'WASTE' | 'AUDIT';
+  action: 'ADD' | 'SALE' | 'REFUND' | 'WASTE' | 'AUDIT' | 'VOID';
   quantity: number;
   recordedAt: number;
   traceId?: string; // Links back to the parent Sale/Expense ID
@@ -240,7 +250,7 @@ const db = new Dexie('POSDatabase') as Dexie & {
   snapshots: EntityTable<MaterializedSnapshot, 'id'>;
 };
 
-db.version(24).stores({
+db.version(25).stores({
   products: 'id, businessId, branchId, name, price, costPrice, quantity, category, barcode, syncStatus',
   sales: 'id, businessId, [businessId+branchId], [businessId+timestamp], [branchId+timestamp], total, totalProfit, timestamp, receiptId, paymentMethod, deviceId, syncStatus',
   purchases: 'id, businessId, branchId, supplierId, total, timestamp, syncStatus',

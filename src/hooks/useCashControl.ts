@@ -27,35 +27,39 @@ export function useCashControl() {
     [businessId, today, branchId]
   );
 
-  const getExpectedCash = async () => {
-    if (!currentLog || !businessId) return 0;
+  const expectedCash = useLiveQuery(
+    async () => {
+      if (!currentLog || !businessId) return 0;
+      const shiftStartTimestamp = currentLog.timestamp;
+      const now = Date.now();
 
-    const todayStart = new Date().setHours(0, 0, 0, 0);
-    const todayEnd = new Date().setHours(23, 59, 59, 999);
+      const todaySales = await db.sales
+        .where('timestamp')
+        .between(shiftStartTimestamp, now)
+        .filter(s => s.status !== 'voided' && s.branchId === currentLog.branchId)
+        .toArray();
 
-    const todaySales = await db.sales
-      .where('timestamp')
-      .between(todayStart, todayEnd)
-      .filter(s => s.branchId === currentLog.branchId)
-      .toArray();
+      const todayExpenses = await db.expenses
+        .where('timestamp')
+        .between(shiftStartTimestamp, now)
+        .filter(e => e.status !== 'rejected' && e.branchId === currentLog.branchId)
+        .toArray();
 
-    const todayExpenses = await db.expenses
-      .where('timestamp')
-      .between(todayStart, todayEnd)
-      .filter(e => e.status !== 'rejected' && e.branchId === currentLog.branchId)
-      .toArray();
+      const salesTotal = todaySales.reduce((sum, s) => sum + s.total, 0);
+      const expensesTotal = todayExpenses.reduce((sum, e) => sum + e.amount, 0);
 
-    const salesTotal = todaySales.reduce((sum, s) => sum + s.total, 0);
-    const expensesTotal = todayExpenses.reduce((sum, e) => sum + e.amount, 0);
+      return currentLog.openingFloat + salesTotal - expensesTotal;
+    },
+    [currentLog, businessId]
+  ) || 0;
 
-    return currentLog.openingFloat + salesTotal - expensesTotal;
-  };
+  const getExpectedCash = async () => expectedCash;
 
   const openRegister = async (openingFloat: number) => {
     if (!businessId || !business) return;
 
     const deviceId = await getDeviceId();
-    const id = await generateTraceableId('CASH', businessId, business.code, deviceId);
+    const id = await generateTraceableId('CASH', businessId, business?.code, deviceId);
     
     const newLog: CashLog = {
       id,
@@ -70,14 +74,14 @@ export function useCashControl() {
       syncStatus: 'pending'
     };
 
-    await db.transaction('rw', db.cash_logs, db.pos_events, db.counters, db.settings, async () => {
+    await db.transaction('rw', [db.cash_logs, db.pos_events, db.counters, db.settings], async () => {
       await db.cash_logs.add(newLog);
       
       const payload = newLog;
       const eventHash = await generateEventHash(payload);
 
       await db.pos_events.add({
-        event_id: await generateTraceableId('ORD', businessId, business.code, deviceId),
+        event_id: await generateTraceableId('EVT', businessId, business?.code, deviceId),
         business_id: businessId,
         staff_id: staff?.id || 'owner',
         event_type: 'CASH_REGISTER_OPENED',
@@ -105,14 +109,14 @@ export function useCashControl() {
       status: 'closed' as const
     };
 
-    await db.transaction('rw', db.cash_logs, db.pos_events, db.counters, db.settings, async () => {
+    await db.transaction('rw', [db.cash_logs, db.pos_events, db.counters, db.settings], async () => {
       await db.cash_logs.update(currentLog.id, update);
       
       const payload = { ...currentLog, ...update };
       const eventHash = await generateEventHash(payload);
 
       await db.pos_events.add({
-        event_id: await generateTraceableId('ORD', businessId!, business.code, deviceId),
+        event_id: await generateTraceableId('EVT', businessId!, business?.code, deviceId),
         business_id: businessId!,
         staff_id: currentLog.staffId,
         event_type: 'CASH_REGISTER_CLOSED',
@@ -127,28 +131,34 @@ export function useCashControl() {
   };
 
   const getZReportData = async () => {
-    if (!currentLog || !businessId) return null;
+    if (!businessId) return null;
 
     const todayStart = new Date().setHours(0, 0, 0, 0);
     const todayEnd = new Date().setHours(23, 59, 59, 999);
 
-    const todaySales = await db.sales
-      .where('timestamp')
-      .between(todayStart, todayEnd)
-      .filter(s => s.branchId === currentLog.branchId && s.status !== 'voided')
-      .toArray();
+    // 1. Fetch relevant logs and stats
+    // Logic: If user is staff, filter by branch. If owner, get ALL.
+    const branchFilter = branchId || undefined;
 
-    const todayExpenses = await db.expenses
-      .where('timestamp')
-      .between(todayStart, todayEnd)
-      .filter(e => e.status !== 'rejected' && e.branchId === currentLog.branchId)
-      .toArray();
+    const salesQuery = db.sales.where('[businessId+timestamp]').between([businessId, todayStart], [businessId, todayEnd]);
+    const expensesQuery = db.expenses.where('[businessId+timestamp]').between([businessId, todayStart], [businessId, todayEnd]);
+
+    let todaySales = await salesQuery.toArray();
+    let todayExpenses = await expensesQuery.toArray();
+
+    // Secondary Filter: Data Parity across devices/branches
+    if (branchFilter) {
+      todaySales = todaySales.filter(s => s.branchId === branchFilter && s.status !== 'voided');
+      todayExpenses = todayExpenses.filter(e => e.branchId === branchFilter && e.status !== 'rejected');
+    } else {
+      todaySales = todaySales.filter(s => s.status !== 'voided');
+      todayExpenses = todayExpenses.filter(e => e.status !== 'rejected');
+    }
 
     const cashSales = todaySales
       .filter(s => s.paymentMethod === 'Cash')
       .reduce((sum, s) => sum + s.total, 0);
     
-    // Handle Split Payments for Cash portion
     const splitCash = todaySales
       .filter(s => s.paymentMethod === 'Split')
       .reduce((sum, s) => {
@@ -168,10 +178,13 @@ export function useCashControl() {
 
     const expensesTotal = todayExpenses.reduce((sum, e) => sum + e.amount, 0);
     const totalCashCollected = cashSales + splitCash;
-    const expectedCashInDrawer = currentLog.openingFloat + totalCashCollected - expensesTotal;
+
+    // For Register expected cash, we still need the the opening float of the CURRENT device/branch register
+    const openingFloat = currentLog?.openingFloat || 0;
+    const expectedCashInDrawer = openingFloat + totalCashCollected - expensesTotal;
 
     return {
-      openingFloat: currentLog.openingFloat,
+      openingFloat,
       cashSales: totalCashCollected,
       mpesaSales,
       expenses: expensesTotal,
@@ -187,6 +200,7 @@ export function useCashControl() {
     openRegister,
     closeRegister,
     getExpectedCash,
-    getZReportData
+    getZReportData,
+    expectedCash
   };
 }

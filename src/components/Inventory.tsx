@@ -1,11 +1,13 @@
-import { Plus, Edit2, Trash2, PackagePlus, Search, X, Download, Upload, FileText, Check, AlertCircle, Bell } from 'lucide-react';
+import { Plus, Search, X, Download, Upload, FileText, Check, AlertCircle, Bell } from 'lucide-react';
 import { useNotifications } from '../hooks/useNotifications';
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { useInventory } from '../hooks/useInventory';
 import { useSubscription } from '../hooks/useSubscription';
-import { type Product } from '../db/db';
+import { useAuth } from '../hooks/useAuth';
+import { type Product, type Branch } from '../db/db';
 import { parseCSV } from '../utils/csvUtils';
 import { playBeep, playChime } from '../utils/audio';
+import { InventoryRow } from './inventory/InventoryRow';
 
 export function Inventory() {
   const { products, addProduct, bulkAddProducts, updateProduct, deleteProduct, restockProduct, auditProduct } = useInventory();
@@ -27,44 +29,59 @@ export function Inventory() {
     costPrice: 0,
     quantity: 0,
     lowStockThreshold: 5,
-    category: '', // Leave empty for focus, logic will handle 'General' fallback
-    barcode: ''
+    category: '', 
+    barcode: '',
+    branchId: ''
   });
 
   const uniqueCategories = Array.from(new Set(products.map(p => p.category || 'General'))).sort();
 
   const filteredProducts = products.filter(p => 
-    p.name.toLowerCase().includes(searchTerm.toLowerCase())
+    p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (p.barcode || '').includes(searchTerm)
   );
+
+  const { branches } = useAuth();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (status === 'suspended') return;
     
+    const productData = {
+      ...formData,
+      branchId: formData.branchId || undefined
+    };
+
     if (editingId) {
-      await updateProduct(editingId, formData);
+      await updateProduct(editingId, productData);
       playBeep();
       setEditingId(null);
     } else {
-      await addProduct(formData);
+      await addProduct(productData);
       playChime();
       setIsAdding(false);
     }
-    setFormData({ name: '', price: 0, costPrice: 0, quantity: 0, lowStockThreshold: 5, category: '', barcode: '' });
+    setFormData({ name: '', price: 0, costPrice: 0, quantity: 0, lowStockThreshold: 5, category: '', barcode: '', branchId: '' });
   };
 
-  const startEdit = (product: Product) => {
+  const startEdit = useCallback((product: Product) => {
     setEditingId(product.id!);
     setFormData({
       name: product.name,
       price: product.price,
       costPrice: product.costPrice ?? 0,
       quantity: product.quantity,
-      lowStockThreshold: product.lowStockThreshold,
+      lowStockThreshold: product.lowStockThreshold ?? 5,
       category: product.category || 'General',
-      barcode: product.barcode || ''
+      barcode: product.barcode || '',
+      branchId: product.branchId || ''
     });
-  };
+  }, []);
+
+  const handleAuditClick = useCallback((product: Product) => {
+    setAuditingProduct(product); 
+    setPhysicalCount(product.quantity);
+  }, []);
 
   const handleExport = () => {
     const headers = ['Name', 'Category', 'Price', 'Cost Price', 'Quantity', 'Barcode'];
@@ -248,35 +265,16 @@ export function Inventory() {
             </tr>
           </thead>
           <tbody>
-            {filteredProducts.map(product => (
-              <tr key={product.id} style={{ borderBottom: '1px solid var(--border)' }}>
-                <td style={{ padding: '16px', fontWeight: 600 }} data-label="Name">{product.name}</td>
-                <td style={{ padding: '16px' }} data-label="Category">{product.category || 'General'}</td>
-                <td style={{ padding: '16px' }} data-label="Price">KES {product.price.toLocaleString()}</td>
-                <td style={{ padding: '16px', color: 'var(--text-muted)' }} data-label="Cost">KES {(product.costPrice ?? 0).toLocaleString()}</td>
-                <td style={{ padding: '16px' }} data-label="Stock">
-                  <span className={`stock-badge ${product.quantity <= product.lowStockThreshold ? 'stock-low' : 'stock-ok'}`}>
-                    {product.quantity} units
-                  </span>
-                </td>
-                <td style={{ padding: '16px', color: 'var(--text-muted)' }} data-label="Threshold">{product.lowStockThreshold}</td>
-                <td style={{ padding: '16px', textAlign: 'right', display: 'flex', gap: '8px', justifyContent: 'flex-end' }} data-label="Actions">
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <button onClick={() => { setAuditingProduct(product); setPhysicalCount(product.quantity); }} className="btn-secondary" style={{ padding: '8px', minHeight: '40px' }} title="Audit Stock" disabled={status === 'suspended'}>
-                      <FileText size={18} />
-                    </button>
-                    <button onClick={() => restockProduct(product.id!, 10)} className="btn-secondary" style={{ padding: '8px', minHeight: '40px' }} title="Quick Add 10" disabled={status === 'suspended'}>
-                      <PackagePlus size={18} />
-                    </button>
-                    <button onClick={() => startEdit(product)} className="btn-secondary" style={{ padding: '8px', minHeight: '40px' }} disabled={status === 'suspended'}>
-                      <Edit2 size={18} />
-                    </button>
-                    <button onClick={() => deleteProduct(product.id!)} className="btn-secondary" style={{ padding: '8px', minHeight: '40px', color: 'var(--danger)' }} disabled={status === 'suspended'}>
-                      <Trash2 size={18} />
-                    </button>
-                  </div>
-                </td>
-              </tr>
+            {filteredProducts.map((product: Product) => (
+              <InventoryRow 
+                key={product.id}
+                product={product}
+                status={status}
+                onAudit={handleAuditClick}
+                onRestock={restockProduct}
+                onEdit={startEdit}
+                onDelete={deleteProduct}
+              />
             ))}
           </tbody>
         </table>
@@ -318,6 +316,22 @@ export function Inventory() {
                   ))}
                 </datalist>
               </div>
+
+              {branches.length > 0 && (
+                <div className="input-group">
+                  <label>Assign to Branch (Optional)</label>
+                  <select 
+                    value={formData.branchId} 
+                    onChange={e => setFormData({...formData, branchId: e.target.value})}
+                    style={{ height: '44px', fontWeight: 700 }}
+                  >
+                    <option value="">Global / All Branches</option>
+                    {branches.map((b: Branch) => (
+                      <option key={b.id} value={b.id}>{b.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
                 <div className="input-group">
                   <label>Price (KES)</label>

@@ -10,13 +10,14 @@ import { useSubscription, type Plan } from '../hooks/useSubscription';
 import { PackageSelection } from './PackageSelection';
 import { SyncDashboard } from './SyncDashboard';
 import { supabase } from '../lib/supabase';
+import { generateEventHash } from '../utils/hashUtils';
 
 export function Settings() {
   const [businessName, setBusinessName] = useState('');
   // useSync initializes background updates
   useSync();
   const { connectBT, connectUSB, connectSerial, isConnected, deviceName, isSupported, transport, isReconnecting } = usePrinter();
-  const { userType, business } = useAuth();
+  const { userType, business, staffId } = useAuth();
   const { packages, status, daysLeft } = useSubscription();
   const [showPlanSelector, setShowPlanSelector] = useState(false);
   
@@ -96,21 +97,37 @@ export function Settings() {
 
   const handleSaveMpesaConfig = async () => {
     if (!business) return;
-    const { error } = await supabase
-      .from('business_mpesa_configs')
-      .upsert({
-        business_id: business.id,
-        payout_destination: payoutDestination,
-        convenience_fee: convenienceFee,
-        is_enabled: useMpesa,
-        updated_at: new Date().toISOString()
-      });
+    const deviceId = await getDeviceId();
+    const now = Date.now();
 
-    if (error) {
-      alert('Error saving M-Pesa config: ' + error.message);
-    } else {
-      alert('M-Pesa Integration updated successfully!');
-    }
+    const mpesaConfig = {
+      payout_destination: payoutDestination,
+      convenience_fee: convenienceFee,
+      is_enabled: useMpesa
+    };
+
+    await db.transaction('rw', [db.businesses, db.pos_events, db.counters, db.settings], async () => {
+      // 1. Update Snapshot
+      await db.businesses.update(business.id, { mpesaConfig });
+
+      // 2. Log Event for Sync
+      const payload = { ...business, mpesaConfig };
+      const eventHash = await generateEventHash(payload);
+
+      await db.pos_events.add({
+        event_id: await generateTraceableId('EVT', business.id, business?.code, deviceId),
+        business_id: business.id,
+        staff_id: staffId || 'owner',
+        event_type: 'BUSINESS_UPDATED',
+        payload,
+        client_timestamp: now,
+        server_timestamp: 0,
+        hash: eventHash,
+        sync_status: 'pending'
+      });
+    });
+
+    alert('M-Pesa Integration updated and queued for sync!');
   };
 
   const handleUpdateProfile = async () => {
@@ -129,15 +146,16 @@ export function Settings() {
       await db.businesses.update(business.id, updates);
       await db.settings.put({ key: 'business_name', value: businessName });
       
+      const eventHash = await generateEventHash({ ...business, ...updates });
       await db.pos_events.add({
-        event_id: await generateTraceableId('ORD', business.id, business.code, deviceId),
+        event_id: await generateTraceableId('EVT', business.id, business?.code, deviceId),
         business_id: business.id,
-        staff_id: 'owner',
+        staff_id: staffId || 'owner',
         event_type: 'BUSINESS_UPDATED',
         payload: { ...business, ...updates },
         client_timestamp: now,
         server_timestamp: 0,
-        hash: 'LATER',
+        hash: eventHash,
         sync_status: 'pending'
       });
     });
@@ -151,15 +169,16 @@ export function Settings() {
     
     await db.transaction('rw', [db.settings, db.pos_events, db.counters], async () => {
       await db.settings.put({ key: 'tax_rate', value: taxRate });
+      const eventHash = await generateEventHash({ key: 'tax_rate', value: taxRate });
       await db.pos_events.add({
-        event_id: await generateTraceableId('ORD', business.id, business.code, deviceId),
+        event_id: await generateTraceableId('EVT', business.id, business?.code, deviceId),
         business_id: business.id,
-        staff_id: 'owner',
+        staff_id: staffId || 'owner',
         event_type: 'SETTING_UPDATED',
         payload: { key: 'tax_rate', value: taxRate },
         client_timestamp: now,
         server_timestamp: 0,
-        hash: 'LATER',
+        hash: eventHash,
         sync_status: 'pending'
       });
     });
@@ -178,27 +197,31 @@ export function Settings() {
       await db.settings.put({ key: 'security_mode', value: securityMode });
       await db.settings.put({ key: 'owner_pin', value: ownerPin });
       
+      const securityPayload = { key: 'security_mode', value: securityMode };
+      const securityHash = await generateEventHash(securityPayload);
       await db.pos_events.add({
-        event_id: await generateTraceableId('ORD', business.id, business.code, deviceId),
+        event_id: await generateTraceableId('EVT', business.id, business?.code, deviceId),
         business_id: business.id,
-        staff_id: 'owner',
+        staff_id: staffId || 'owner',
         event_type: 'SETTING_UPDATED',
-        payload: { key: 'security_mode', value: securityMode },
+        payload: securityPayload,
         client_timestamp: now,
         server_timestamp: 0,
-        hash: 'LATER',
+        hash: securityHash,
         sync_status: 'pending'
       });
 
+      const pinPayload = { key: 'owner_pin', value: ownerPin };
+      const pinHash = await generateEventHash(pinPayload);
       await db.pos_events.add({
-        event_id: await generateTraceableId('ORD', business.id, business.code, deviceId),
+        event_id: await generateTraceableId('EVT', business.id, business?.code, deviceId),
         business_id: business.id,
-        staff_id: 'owner',
+        staff_id: staffId || 'owner',
         event_type: 'SETTING_UPDATED',
-        payload: { key: 'owner_pin', value: ownerPin },
+        payload: pinPayload,
         client_timestamp: now,
         server_timestamp: 0,
-        hash: 'LATER',
+        hash: pinHash,
         sync_status: 'pending'
       });
     });

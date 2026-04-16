@@ -1,5 +1,4 @@
 import React from 'react';
-import { db } from '../db/db';
 import { useSubscription, MODULAR_FEATURES } from '../hooks/useSubscription';
 import { useAuth } from '../hooks/useAuth';
 import { 
@@ -25,37 +24,39 @@ export function CustomPlanSelector({ onComplete }: { onComplete?: () => void }) 
     staffCount, 
     staffCost,
     toggleFeature, 
-    updatePlan,
+    confirmPlanSelection,
+    requestVerification,
     enabledFeatures 
   } = useSubscription();
 
   const [showPayment, setShowPayment] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [transactionCode, setTransactionCode] = React.useState('');
 
   const currentPackageId = business?.packageId || 'custom';
   const basePrice = (packages as Record<string, { price: number }>)[currentPackageId]?.price || 0;
 
   const handleBaseSelect = async (id: string) => {
-    await updatePlan(id);
+    // Only update the local package selection state
+    await confirmPlanSelection(id, enabledFeatures);
   };
 
   const handleConfirm = async () => {
     if (!business) return;
     try {
+      await confirmPlanSelection(currentPackageId, enabledFeatures);
+
+      // Post-confirmation flow
       if (!business.trialUsed) {
-        const TRIAL_DAYS = 5;
-        const expiryDate = new Date().getTime() + TRIAL_DAYS * 24 * 60 * 60 * 1000;
-        await db.businesses.update(business.id, { 
-          expiryDate,
-          status: 'trial',
-          trialUsed: true
-        });
         alert('Plan confirmed and 5-day trial activated!');
-        if (onComplete) onComplete();
-        else window.location.reload();
-      } else {
+      } else if (business.status === 'suspended' || business.status === 'pending_payment') {
         setShowPayment(true);
+        return;
       }
+
+      if (onComplete) onComplete();
+      else window.location.reload();
+      
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to save plan');
       console.error(err);
@@ -255,9 +256,8 @@ export function CustomPlanSelector({ onComplete }: { onComplete?: () => void }) 
                      type="text" 
                      placeholder="e.g. QRC7W8X9Y" 
                      style={{ height: '48px', fontSize: '1rem', fontWeight: 800, letterSpacing: '1px' }}
-                     onChange={() => {
-                       // Manual verification logic
-                     }}
+                     value={transactionCode}
+                     onChange={(e) => setTransactionCode(e.target.value)}
                    />
                 </div>
 
@@ -266,12 +266,15 @@ export function CustomPlanSelector({ onComplete }: { onComplete?: () => void }) 
                      className="btn-primary" 
                      style={{ flex: 1 }}
                      onClick={async () => {
-                       // Optimized: Just set to pending_verification for now
-                       await db.businesses.update(business!.id, { status: 'pending_verification' });
-                       setShowPayment(false);
-                       alert('Payment code submitted. Your account will be activated shortly.');
-                       if (onComplete) onComplete();
-                       else window.location.reload();
+                       try {
+                         await requestVerification(transactionCode);
+                         setShowPayment(false);
+                         alert('Payment code submitted. Your account will be activated shortly.');
+                         if (onComplete) onComplete();
+                         else window.location.reload();
+                       } catch (err: unknown) {
+                         alert('Failed to submit: ' + (err instanceof Error ? err.message : 'Unknown error'));
+                       }
                      }}
                    >
                      Submit Code

@@ -56,7 +56,8 @@ export function useReports(timeWindow: TimeWindow, branchFilter?: string) {
       const matchesTime = sale.timestamp >= startTimestamp;
       const effectiveBranchFilter = userType === 'staff' ? userBranchId : (branchFilter || null);
       const matchesBranch = !effectiveBranchFilter || sale.branchId === effectiveBranchFilter;
-      return matchesTime && matchesBranch;
+      // EXCLUDE VOIDED SALES
+      return matchesTime && matchesBranch && sale.status !== 'voided';
     });
 
     // Filter expenses by time window and branch
@@ -64,8 +65,8 @@ export function useReports(timeWindow: TimeWindow, branchFilter?: string) {
       const matchesTime = exp.timestamp >= startTimestamp;
       const effectiveBranchFilter = userType === 'staff' ? userBranchId : (branchFilter || null);
       const matchesBranch = !effectiveBranchFilter || exp.branchId === effectiveBranchFilter;
-      // Only subtract 'verified' expenses
-      return matchesTime && matchesBranch && exp.status !== 'pending';
+      // Exclude only rejected expenses
+      return matchesTime && matchesBranch && exp.status !== 'rejected';
     });
 
     // Calculate totals
@@ -107,9 +108,20 @@ export function useReports(timeWindow: TimeWindow, branchFilter?: string) {
     const staffPerformance = Object.values(staffPerformanceMap)
       .sort((a, b) => b.revenue - a.revenue);
 
-    // Trend Calculations
-    const todaySales = allSales.filter(s => s.timestamp >= startTimestamp);
-    const todayProfit = todaySales.reduce((sum, s) => sum + (s.totalProfit || 0), 0);
+    // Dynamic Trend Calculations
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    const yesterdayStart = todayStart - (24 * 60 * 60 * 1000);
+    
+    const todaySalesData = allSales.filter(s => s.timestamp >= todayStart && s.status !== 'voided');
+    const yesterdaySalesData = allSales.filter(s => s.timestamp >= yesterdayStart && s.timestamp < todayStart && s.status !== 'voided');
+    
+    const todayProfit = todaySalesData.reduce((sum, s) => sum + (s.totalProfit || 0), 0);
+    const yesterdayProfit = yesterdaySalesData.reduce((sum, s) => sum + (s.totalProfit || 0), 0);
+    const yesterdaySales = yesterdaySalesData.reduce((sum, s) => sum + s.total, 0);
+
+    const trendPercentage = yesterdayProfit === 0 
+      ? (todayProfit > 0 ? 100 : 0) 
+      : Math.round(((todayProfit - yesterdayProfit) / yesterdayProfit) * 100);
     
     return {
       sales: filteredSales.sort((a, b) => b.timestamp - a.timestamp),
@@ -121,9 +133,9 @@ export function useReports(timeWindow: TimeWindow, branchFilter?: string) {
       staffPerformance,
       trends: {
         todayProfit,
-        yesterdayProfit: 0, // Simplified for now
-        yesterdaySales: 0,
-        trendPercentage: 0
+        yesterdayProfit,
+        yesterdaySales,
+        trendPercentage
       }
     };
   }, [queryResult, rawExpenses, rawStaffList, timeWindow, branchFilter, userBranchId, userType]);
