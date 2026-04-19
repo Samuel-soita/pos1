@@ -88,7 +88,34 @@ export function useAuth() {
     }
 
     loadSession();
-    return () => { mounted = false; clearTimeout(safetyTimer); };
+
+    // REAL-TIME AUTH SYNC: Handle login/logout across tabs
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      console.log(`[Auth] State change detected: ${event}`);
+      
+      if (event === 'SIGNED_OUT') {
+        localStorage.removeItem('biz_id');
+        localStorage.removeItem('staff_id');
+        localStorage.removeItem('pinned_biz_code');
+        setBizIdState(null);
+        setStaffIdState(null);
+        setUserType(null);
+        // Force reload to clear state and redirect to auth
+        if (mounted) window.location.reload();
+      } else if (event === 'SIGNED_IN' || event === 'USER_UPDATED') {
+        if (session?.user) {
+          setBizIdState(session.user.id);
+          setUserType('owner');
+          localStorage.setItem('biz_id', session.user.id);
+        }
+      }
+    });
+
+    return () => { 
+      mounted = false; 
+      clearTimeout(safetyTimer);
+      subscription.unsubscribe();
+    };
   }, [sessionLoading]);
 
   const provisionBusiness = async (token: string, name: string, pin: string, email: string) => {

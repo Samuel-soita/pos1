@@ -349,36 +349,63 @@ function UpdateStatus() {
   );
 }
 function SyncStatus() {
-  const { pendingCount, isOnline, isSyncing, syncHealth } = useSyncStatus();
-
-  if (isSyncing) {
-    return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--warning)', fontWeight: 700, fontSize: '0.85rem' }}>
-        <span style={{ fontSize: '1.2rem', animation: 'spin 2s linear infinite', display: 'inline-block' }}>🟡</span>
-        <span className="desktop-only">Syncing...</span>
-      </div>
-    );
-  }
-
-  if (!isOnline) {
-    return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--danger)', fontWeight: 700, fontSize: '0.85rem' }}>
-        <span style={{ fontSize: '1.2rem' }}>🔴</span>
-        <span>Offline {pendingCount > 0 && `(${pendingCount} pending)`}</span>
-      </div>
-    );
-  }
+  const { pendingCount, isOnline, isSyncing, activeTerminals } = useSyncStatus();
 
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: syncHealth < 100 ? 'var(--warning)' : 'var(--success)', fontWeight: 700, fontSize: '0.85rem' }}>
-      <span style={{ fontSize: '1.2rem' }}>{syncHealth < 100 ? '🟠' : '🟢'}</span>
-      <div style={{ display: 'flex', flexDirection: 'column', lineHeight: 1 }}>
-        <span className="desktop-only" style={{ fontSize: '0.75rem' }}>
-           {syncHealth < 100 ? 'Sync Discrepancy' : 'Cloud Saved'}
-        </span>
-        <span style={{ fontSize: '0.65rem', opacity: 0.8 }}>Health: {syncHealth}%</span>
+    <div style={{ 
+      display: 'flex', 
+      alignItems: 'center', 
+      gap: '8px', 
+      background: 'var(--bg-secondary)',
+      padding: '4px 12px',
+      borderRadius: '20px',
+      border: `1px solid ${!isOnline ? 'var(--danger)' : (isSyncing ? 'var(--warning)' : 'var(--border)')}`,
+      height: '36px',
+      transition: 'all 0.3s ease'
+    }}>
+      <div style={{ position: 'relative' }}>
+        <div style={{ 
+          width: '8px', 
+          height: '8px', 
+          borderRadius: '50%', 
+          background: !isOnline ? '#ef4444' : (isSyncing ? '#f59e0b' : '#10b981'),
+          boxShadow: isSyncing ? '0 0 8px #f59e0b' : 'none'
+        }} />
+        {isSyncing && (
+          <div style={{ 
+            position: 'absolute', 
+            inset: -4, 
+            border: '2px solid #f59e0b', 
+            borderRadius: '50%', 
+            animation: 'pulse 1.5s infinite' 
+          }} />
+        )}
       </div>
-      {pendingCount > 0 && <span className="mobile-only">({pendingCount})</span>}
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0' }}>
+        <div style={{ fontSize: '0.7rem', fontWeight: 800, color: 'var(--text)', lineHeight: 1 }}>
+          {!isOnline ? 'OFFLINE' : (isSyncing ? 'SYNCING...' : 'LIVE')}
+        </div>
+        {isOnline && (
+          <div style={{ fontSize: '0.6rem', fontWeight: 600, color: 'var(--text-muted)', lineHeight: 1, marginTop: '2px' }}>
+            {activeTerminals} {activeTerminals === 1 ? 'Terminal' : 'Terminals'} Online
+          </div>
+        )}
+      </div>
+
+      {pendingCount > 0 && (
+        <div style={{ 
+          background: 'var(--danger)', 
+          color: 'white', 
+          fontSize: '0.65rem', 
+          fontWeight: 900, 
+          padding: '2px 6px', 
+          borderRadius: '10px',
+          animation: 'bounce 1s infinite'
+        }}>
+          {pendingCount}
+        </div>
+      )}
     </div>
   );
 }
