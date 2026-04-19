@@ -141,15 +141,15 @@ export function useCashControl() {
   const getZReportData = useCallback(async () => {
     if (!businessId) return null;
 
-    const todayStart = new Date().setHours(0, 0, 0, 0);
     const todayEnd = new Date().setHours(23, 59, 59, 999);
+    const shiftStart = currentLog?.timestamp || new Date().setHours(0, 0, 0, 0);
 
     // 1. Fetch relevant logs and stats
     // Logic: If user is staff, filter by branch. If owner, get ALL.
     const branchFilter = branchId || undefined;
 
-    const salesQuery = db.sales.where('[businessId+timestamp]').between([businessId, todayStart], [businessId, todayEnd]);
-    const expensesQuery = db.expenses.where('[businessId+timestamp]').between([businessId, todayStart], [businessId, todayEnd]);
+    const salesQuery = db.sales.where('[businessId+timestamp]').between([businessId, shiftStart], [businessId, todayEnd]);
+    const expensesQuery = db.expenses.where('[businessId+timestamp]').between([businessId, shiftStart], [businessId, todayEnd]);
 
     let todaySales = await salesQuery.toArray();
     let todayExpenses = await expensesQuery.toArray();
