@@ -13,7 +13,6 @@ import { useCompaction } from './hooks/useCompaction';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from './db/db';
 import { Sparkles, CheckCircle2 } from 'lucide-react';
-import { SyncProvider } from './context/SyncContext';
 
 import { Dashboard } from './components/Dashboard';
 import { AuthScreen } from './components/AuthScreen';
@@ -175,7 +174,7 @@ function App() {
   };
 
   return (
-    <SyncProvider>
+    <>
       <Layout activeTab={activeTab} setActiveTab={setActiveTab}>
         <Suspense fallback={<LoadingSkeleton />}>
           <div key={activeTab} className="view-transition" style={{ flex: 1, display: 'flex', flexDirection: 'column' }}>
@@ -230,7 +229,7 @@ function App() {
           </div>
         </div>
       )}
-    </SyncProvider>
+    </>
   );
 }
 

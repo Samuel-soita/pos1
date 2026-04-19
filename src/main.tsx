@@ -23,11 +23,14 @@ const init = async () => {
 init();
 
 import { ErrorBoundary } from './components/ErrorBoundary'
+import { SyncProvider } from './context/SyncContext'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ErrorBoundary>
-      <App />
+      <SyncProvider>
+        <App />
+      </SyncProvider>
     </ErrorBoundary>
   </StrictMode>,
 )
