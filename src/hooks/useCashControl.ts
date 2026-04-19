@@ -200,7 +200,7 @@ export function useCashControl() {
       salesCount: todaySales.length,
       expensesCount: todayExpenses.length
     };
-  }, [businessId, branchId, currentLog?.openingFloat]);
+  }, [businessId, branchId, currentLog]);
 
   return {
     currentLog,
