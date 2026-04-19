@@ -703,6 +703,16 @@ export function useSync() {
     return () => clearInterval(heartbeat);
   }, [isOnline, businessId, syncAll]);
 
+  // Phase 3: Instant Local Push
+  const pendingCount = useLiveQuery(() => db.pos_events.where('sync_status').equals('pending').count());
+  
+  useEffect(() => {
+    if (isOnline && pendingCount && pendingCount > 0) {
+      console.log(`[ESA] Instant Local Push triggered by ${pendingCount} pending events.`);
+      syncAll();
+    }
+  }, [isOnline, pendingCount, syncAll]);
+
   // Helper to map Supabase snake_case business records to Dexie camelCase
   function mapBusinessFromSync(remote: Record<string, unknown>): Partial<Business> {
     const mapped: Record<string, unknown> = { ...remote };
