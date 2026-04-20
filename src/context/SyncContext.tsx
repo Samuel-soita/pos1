@@ -45,17 +45,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  // Handle Broadcast Messages (Instant Local Sync)
-  useEffect(() => {
-    const handleMessage = (event: MessageEvent) => {
-      if (event.data.type === 'LOCAL_CHANGE_DETECTED') {
-        console.log('[Sync] Local change detected in another tab. Triggering sync...');
-        syncAll();
-      }
-    };
-    broadcast.addEventListener('message', handleMessage);
-    return () => broadcast.removeEventListener('message', handleMessage);
-  }, []);
+
 
   const pushLocalChanges = useCallback(async () => {
     if (!businessId) return;
@@ -88,7 +78,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
           .from('pos_events')
           .upsert(payloadBatch, { ignoreDuplicates: true, onConflict: 'event_id' });
 
-        const isConflict = error && (error as any).code === '23505';
+        const isConflict = error && (error as unknown as { code: string }).code === '23505';
 
         if (error) {
           if (isConflict) {
@@ -119,9 +109,9 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
         const eventIds = pendingBatch.map(e => e.event_id);
         await db.pos_events.where('event_id').anyOf(eventIds).modify({ sync_status: 'synced' });
 
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.error('Event Push failure:', err);
-        setSyncError(err.message || String(err));
+        setSyncError(err instanceof Error ? err.message : String(err));
         continue; 
       }
     }
@@ -150,7 +140,8 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
 
       let currentCursor = lastSynced;
       let hasMore = true;
-      let allIncoming: any[] = [];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      let allIncoming: any[] = []; // Keep any for polymorphic event data
 
       while (hasMore) {
         const batch = await fetchBatch(currentCursor);
@@ -474,7 +465,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
         localStorage.setItem(`entitlement_${bizId}_last_sync`, Date.now().toString());
       }
 
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Pull failed:', err);
     }
   }, [businessId]);
@@ -499,8 +490,8 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
         if (!localStorage.getItem('initial_sync_done')) {
           localStorage.setItem('initial_sync_done', 'true');
         }
-      } catch (err: any) {
-        setSyncError(err.message || 'Sync failed');
+      } catch (err: unknown) {
+        setSyncError(err instanceof Error ? err.message : 'Sync failed');
       } finally {
         if (needsSyncRef.current) {
           needsSyncRef.current = false;
@@ -552,6 +543,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
   }, [businessId, syncAll]);
 
   // Realtime Subscription with Presence
+
   useEffect(() => {
     if (!businessId || !isOnline) return;
 
@@ -605,7 +597,8 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       })
       .subscribe(async (status) => {
         if (status === 'SUBSCRIBED') {
-          console.log('[Sync] Subscribed to Realtime.');
+          console.log('[Sync] Subscribed to Realtime. Triggering initial catch-up...');
+          syncAll(); // Fetch any missed events while we were connecting
           await channel.track({
             online_at: new Date().toISOString(),
             user_type: userType,
@@ -645,8 +638,30 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
     }
   }, [isOnline, pendingCount, syncAll]);
 
-  function mapBusinessFromSync(remote: Record<string, any>): Partial<Business> {
-    const mapped: any = { ...remote };
+  // Handle Broadcast Messages (Instant Local Sync)
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data.type === 'LOCAL_CHANGE_DETECTED') {
+        console.log('[Sync] Local change detected in another tab. Triggering sync...');
+        syncAll();
+      }
+    };
+    broadcast.addEventListener('message', handleMessage);
+    return () => broadcast.removeEventListener('message', handleMessage);
+  }, [syncAll]);
+
+  // Immediate sync on businessId detection
+  useEffect(() => {
+    if (businessId && isOnline) {
+      console.log('[Sync] Business identified. Triggering immediate syncAll...');
+      syncAll();
+    }
+  }, [businessId, isOnline, syncAll]);
+
+
+  function mapBusinessFromSync(remote: Record<string, unknown>): Partial<Business> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const mapped: any = { ...remote }; // mapped needs to be dynamic for conversion
     if (remote.package_id !== undefined) mapped.packageId = remote.package_id;
     if (remote.expiry_date !== undefined) {
       mapped.expiryDate = typeof remote.expiry_date === 'string' 

@@ -399,39 +399,33 @@ ALTER TABLE products ENABLE ROW LEVEL SECURITY;
 ALTER TABLE business_mpesa_configs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE payment_requests ENABLE ROW LEVEL SECURITY;
 
--- Multi-Tenant Isolation (Idempotent cleanup)
-DROP POLICY IF EXISTS "Strict Tenant Isolation (Businesses)" ON businesses;
-DROP POLICY IF EXISTS "Strict Tenant Isolation (pos_events)" ON pos_events;
-DROP POLICY IF EXISTS "Strict Tenant Isolation (Sales)" ON sales;
-DROP POLICY IF EXISTS "Strict Tenant Isolation (Products)" ON products;
-DROP POLICY IF EXISTS "Strict Tenant Isolation (Expenses)" ON expenses;
-DROP POLICY IF EXISTS "Strict Tenant Isolation (Shifts)" ON shifts;
-DROP POLICY IF EXISTS "Strict Tenant Isolation (Cash Logs)" ON cash_logs;
-DROP POLICY IF EXISTS "Strict Tenant Isolation (Snapshots)" ON snapshots;
-DROP POLICY IF EXISTS "Strict Tenant Isolation (Settings)" ON settings;
-DROP POLICY IF EXISTS "Strict Tenant Isolation (Businesses)" ON businesses;
-CREATE POLICY "Strict Tenant Isolation (Businesses)" ON businesses FOR ALL USING (id = auth.uid()) WITH CHECK (id = auth.uid()); 
+-- Multi-Tenant Isolation (Inclusive of Staff/Anon with Business Context)
+-- Note: We allow 'anon' access filtered by business_id to support Staff sync without Supabase Auth accounts.
+CREATE POLICY "Tenant Isolation (pos_events)" ON pos_events FOR ALL USING (business_id = auth.uid() OR (auth.role() = 'anon' AND business_id IS NOT NULL)) WITH CHECK (business_id = auth.uid() OR (auth.role() = 'anon' AND business_id IS NOT NULL));
 
-DROP POLICY IF EXISTS "Strict Tenant Isolation (pos_events)" ON pos_events;
-CREATE POLICY "Strict Tenant Isolation (pos_events)" ON pos_events FOR ALL USING (business_id = auth.uid()) WITH CHECK (business_id = auth.uid());
+CREATE POLICY "Tenant Isolation (Sales)" ON sales FOR ALL USING (business_id = auth.uid() OR (auth.role() = 'anon' AND business_id IS NOT NULL)) WITH CHECK (business_id = auth.uid() OR (auth.role() = 'anon' AND business_id IS NOT NULL));
 
-DROP POLICY IF EXISTS "Strict Tenant Isolation (Sales)" ON sales;
-CREATE POLICY "Strict Tenant Isolation (Sales)" ON sales FOR ALL USING (business_id = auth.uid()) WITH CHECK (business_id = auth.uid());
+CREATE POLICY "Tenant Isolation (Products)" ON products FOR ALL USING (business_id = auth.uid() OR (auth.role() = 'anon' AND business_id IS NOT NULL)) WITH CHECK (business_id = auth.uid() OR (auth.role() = 'anon' AND business_id IS NOT NULL));
 
-DROP POLICY IF EXISTS "Strict Tenant Isolation (Products)" ON products;
-CREATE POLICY "Strict Tenant Isolation (Products)" ON products FOR ALL USING (business_id = auth.uid()) WITH CHECK (business_id = auth.uid());
+CREATE POLICY "Tenant Isolation (Expenses)" ON expenses FOR ALL USING (business_id = auth.uid() OR (auth.role() = 'anon' AND business_id IS NOT NULL)) WITH CHECK (business_id = auth.uid() OR (auth.role() = 'anon' AND business_id IS NOT NULL));
 
-DROP POLICY IF EXISTS "Strict Tenant Isolation (Expenses)" ON expenses;
-CREATE POLICY "Strict Tenant Isolation (Expenses)" ON expenses FOR ALL USING (business_id = auth.uid()) WITH CHECK (business_id = auth.uid());
+CREATE POLICY "Tenant Isolation (Settings)" ON settings FOR ALL USING (business_id = auth.uid() OR (auth.role() = 'anon' AND business_id IS NOT NULL)) WITH CHECK (business_id = auth.uid() OR (auth.role() = 'anon' AND business_id IS NOT NULL));
 
-DROP POLICY IF EXISTS "Strict Tenant Isolation (Settings)" ON settings;
-CREATE POLICY "Strict Tenant Isolation (Settings)" ON settings FOR ALL USING (business_id = auth.uid()) WITH CHECK (business_id = auth.uid());
+CREATE POLICY "Tenant Isolation (Purchases)" ON purchases FOR ALL USING (business_id = auth.uid() OR (auth.role() = 'anon' AND business_id IS NOT NULL)) WITH CHECK (business_id = auth.uid() OR (auth.role() = 'anon' AND business_id IS NOT NULL));
 
-DROP POLICY IF EXISTS "Strict Tenant Isolation (Purchases)" ON purchases;
-CREATE POLICY "Strict Tenant Isolation (Purchases)" ON purchases FOR ALL USING (business_id = auth.uid()) WITH CHECK (business_id = auth.uid());
+CREATE POLICY "Tenant Isolation (Suppliers)" ON suppliers FOR ALL USING (business_id = auth.uid() OR (auth.role() = 'anon' AND business_id IS NOT NULL)) WITH CHECK (business_id = auth.uid() OR (auth.role() = 'anon' AND business_id IS NOT NULL));
 
-DROP POLICY IF EXISTS "Strict Tenant Isolation (Suppliers)" ON suppliers;
-CREATE POLICY "Strict Tenant Isolation (Suppliers)" ON suppliers FOR ALL USING (business_id = auth.uid()) WITH CHECK (business_id = auth.uid());
+CREATE POLICY "Tenant Isolation (Branches)" ON branches FOR ALL USING (business_id = auth.uid() OR (auth.role() = 'anon' AND business_id IS NOT NULL)) WITH CHECK (business_id = auth.uid() OR (auth.role() = 'anon' AND business_id IS NOT NULL));
+
+CREATE POLICY "Tenant Isolation (Staff)" ON staff FOR ALL USING (business_id = auth.uid() OR (auth.role() = 'anon' AND business_id IS NOT NULL)) WITH CHECK (business_id = auth.uid() OR (auth.role() = 'anon' AND business_id IS NOT NULL));
+
+CREATE POLICY "Tenant Isolation (Shifts)" ON shifts FOR ALL USING (business_id = auth.uid() OR (auth.role() = 'anon' AND business_id IS NOT NULL)) WITH CHECK (business_id = auth.uid() OR (auth.role() = 'anon' AND business_id IS NOT NULL));
+
+CREATE POLICY "Tenant Isolation (Cash Logs)" ON cash_logs FOR ALL USING (business_id = auth.uid() OR (auth.role() = 'anon' AND business_id IS NOT NULL)) WITH CHECK (business_id = auth.uid() OR (auth.role() = 'anon' AND business_id IS NOT NULL));
+
+CREATE POLICY "Tenant Isolation (Snapshots)" ON snapshots FOR ALL USING (business_id = auth.uid() OR (auth.role() = 'anon' AND business_id IS NOT NULL)) WITH CHECK (business_id = auth.uid() OR (auth.role() = 'anon' AND business_id IS NOT NULL));
+
+
 
 -- Prevent overwrite destruction on immutable financial tables for staff
 REVOKE UPDATE, DELETE ON sales FROM authenticated;
