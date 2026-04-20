@@ -1,128 +1,29 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { db, type Business } from '../db/db';
 import { supabase } from '../lib/supabase';
-import { useLiveQuery } from 'dexie-react-hooks';
+import { useAuthContext } from '../context/AuthContext';
 
 export function useAuth() {
-  const [userType, setUserType] = useState<'owner' | 'staff' | null>(() => {
-    if (localStorage.getItem('staff_id')) return 'staff';
-    if (localStorage.getItem('biz_id')) return 'owner';
-    return null;
-  });
-  const [bizIdState, setBizIdState] = useState(() => localStorage.getItem('biz_id'));
-  const [staffIdState, setStaffIdState] = useState(() => localStorage.getItem('staff_id'));
-  const [sessionLoading, setSessionLoading] = useState(true);
+  const { 
+    userType, 
+    business, 
+    staff, 
+    businessId, 
+    branchId, 
+    staffId, 
+    branches,
+    isLoading: contextLoading, 
+    isOptimisticReady, 
+    refreshAuth 
+  } = useAuthContext();
+
   const [manualLoading, setManualLoading] = useState(false);
-
-  const currentBusiness = useLiveQuery(
-    async () => bizIdState ? await db.businesses.get(bizIdState) : null,
-    [bizIdState]
-  );
-
-  const currentStaff = useLiveQuery(
-    async () => staffIdState ? await db.staff.get(staffIdState) : null,
-    [staffIdState]
-  );
-
-  // Derived loading state: true if session is still resolving OR if a manual action is in progress OR if a known ID is still fetching its record
-  const isLoading = sessionLoading || manualLoading || 
-    (bizIdState && currentBusiness === undefined) || 
-    (staffIdState && currentStaff === undefined);
-
-  const isOptimisticReady = !!bizIdState || !!staffIdState;
-
-  // Diagnostic logging to identify hangs
-  useEffect(() => {
-    if (isLoading) {
-      const timer = setTimeout(() => {
-        console.warn('[Auth] Loading hang detected. State:', { sessionLoading, manualLoading, bizId: !!bizIdState, bizLoaded: currentBusiness !== undefined });
-      }, 5000);
-      return () => clearTimeout(timer);
-    }
-  }, [isLoading, sessionLoading, manualLoading, bizIdState, currentBusiness]);
-  
-  const setIsLoading = setManualLoading; 
-
-  const branches = useLiveQuery(
-    async () => bizIdState ? await db.branches.where('businessId').equals(bizIdState).toArray() : [],
-    [bizIdState]
-  ) || [];
-
-  // Persistence & Session Recovery
-  useEffect(() => {
-    let mounted = true;
-    
-    // Safety Timeout: Release UI lock after 8s regardless of network/DB status
-    const safetyTimer = setTimeout(() => {
-      if (mounted && sessionLoading) {
-        console.error('[Auth] Session recovery timed out. Force-releasing loading state.');
-        setSessionLoading(false);
-      }
-    }, 8000);
-
-    async function loadSession() {
-      try {
-        const storedBizId = localStorage.getItem('biz_id');
-        const storedStaffId = localStorage.getItem('staff_id');
-        
-        const { data: { session } } = await supabase.auth.getSession();
-        
-        if (storedStaffId) {
-          setStaffIdState(storedStaffId);
-          setUserType('staff');
-        } else if (session) {
-          setBizIdState(session.user.id);
-          setUserType('owner');
-        } else if (storedBizId) {
-          setBizIdState(storedBizId);
-          setUserType('owner');
-        }
-      } catch (err) {
-        console.error('[Auth] Critical failure during session recovery:', err);
-      } finally {
-        if (mounted) {
-          setSessionLoading(false);
-          clearTimeout(safetyTimer);
-        }
-      }
-    }
-
-    loadSession();
-
-    // REAL-TIME AUTH SYNC: Handle login/logout across tabs
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      console.log(`[Auth] State change detected: ${event}`);
-      
-      if (event === 'SIGNED_OUT') {
-        localStorage.removeItem('biz_id');
-        localStorage.removeItem('staff_id');
-        localStorage.removeItem('pinned_biz_code');
-        setBizIdState(null);
-        setStaffIdState(null);
-        setUserType(null);
-        // Force reload to clear state and redirect to auth
-        if (mounted) window.location.reload();
-      } else if (event === 'SIGNED_IN' || event === 'USER_UPDATED') {
-        if (session?.user) {
-          setBizIdState(session.user.id);
-          setUserType('owner');
-          localStorage.setItem('biz_id', session.user.id);
-        }
-      }
-    });
-
-    return () => { 
-      mounted = false; 
-      clearTimeout(safetyTimer);
-      subscription.unsubscribe();
-    };
-  }, [sessionLoading]);
+  const isLoading = contextLoading || manualLoading;
 
   const provisionBusiness = async (token: string, name: string, pin: string, email: string) => {
-    setIsLoading(true);
+    setManualLoading(true);
     try {
-      // 1. Validate the Activation Token (Checking for Master Token Override first)
-      const MASTER_TOKEN = 'SMUTA-SOITA -MASTER-2026';
+      const MASTER_TOKEN = 'SMUTA-SOITA-MASTER-2026';
       let isValid = token.trim() === MASTER_TOKEN.trim();
 
       if (!isValid) {
@@ -135,11 +36,9 @@ export function useAuth() {
 
       if (!isValid) throw new Error('Invalid or Expired Activation Token. Access Denied.');
 
-      // 2. Fetch the secure randomized Business Code (e.g. A7K-9P2)
       const { data: businessCode, error: codeError } = (await supabase.rpc('get_secure_business_code')) as { data: string | null, error: { message: string } | null };
       if (codeError || !businessCode) throw new Error(`Could not generate secure business code: ${codeError?.message || 'Empty response'}`);
 
-      // 3. Register the Business Owner in Supabase Auth
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email,
         password: pin.padStart(6, '0'),
@@ -151,11 +50,10 @@ export function useAuth() {
       if (authError) throw authError;
       if (!authData.user) throw new Error('Provisioning failed: No user created.');
 
-      const businessId = authData.user.id;
+      const bizId = authData.user.id;
 
-      // 4. Create the business record in Dexie
       const newBiz: Business = {
-        id: businessId,
+        id: bizId,
         name,
         code: businessCode,
         pin,
@@ -170,10 +68,9 @@ export function useAuth() {
 
       await db.businesses.put(newBiz);
       
-      // 5. Log the provisioning audit (Permanent Registry)
       await supabase.from('provisioning_audit').insert([{
-        business_id: businessId,
-        business_code: businessCode, // NEW: Explicitly store code in registry
+        business_id: bizId,
+        business_code: businessCode,
         engineer_id: 'SYSTEM_INSTALLER',
         device_metadata: { 
           userAgent: navigator.userAgent,
@@ -181,29 +78,25 @@ export function useAuth() {
         }
       }]);
 
-      // 6. Direct Entry: Setup session pointers immediately
-      setBizIdState(businessId);
-      setUserType('owner');
-      localStorage.setItem('biz_id', businessId);
+      localStorage.setItem('biz_id', bizId);
       localStorage.setItem('pinned_biz_code', businessCode);
-      localStorage.setItem('initial_sync_done', 'true'); // First device is fresh
+      localStorage.setItem('initial_sync_done', 'true');
       
+      await refreshAuth();
       return newBiz;
     } finally {
-      setIsLoading(false);
+      setManualLoading(false);
     }
   };
 
   const businessLogin = async (businessCode: string, pin: string, email?: string) => {
     let finalEmail = email;
 
-    // If email isn't provided (email-less login), look it up locally then cloud resolver
     if (!finalEmail) {
       const biz = await db.businesses.where('code').equals(businessCode).first();
       if (biz?.ownerEmail) {
         finalEmail = biz.ownerEmail;
       } else {
-        // New Device Case: Resolve Email from Cloud using Business Code
         const { data: cloudEmail, error: resolveErr } = await supabase.rpc('resolve_business_email', {
           p_code: businessCode
         });
@@ -219,7 +112,6 @@ export function useAuth() {
       throw new Error('Could not resolve business email. Please contact support.');
     }
 
-    // Perform Supabase Login
     const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
       email: finalEmail,
       password: pin.padStart(6, '0')
@@ -227,13 +119,14 @@ export function useAuth() {
 
     if (authError) throw authError;
 
-    const biz = await db.businesses.get(authData.user.id);
+    const bizId = authData.user.id;
+    const biz = await db.businesses.get(bizId);
+    
     if (!biz) {
-       // If local record is missing but cloud exists, sync it down
        const { data: remoteBiz } = await supabase
          .from('businesses')
-         .select('id, name, code, pin, package_id, expiry_date, status, trial_used, suspended_revenue_count, staff_count, mpesa_config, enabled_features, telephone, address, kra_pin')
-         .eq('id', authData.user.id)
+         .select('*')
+         .eq('id', bizId)
          .maybeSingle();
 
        if (remoteBiz) {
@@ -255,72 +148,92 @@ export function useAuth() {
             kraPin: remoteBiz.kra_pin || ''
           };
           await db.businesses.put(newBiz);
-          setBizIdState(newBiz.id);
        }
-    } else {
-      setBizIdState(biz.id);
     }
 
-    setUserType('owner');
-    localStorage.setItem('biz_id', authData.user.id);
+    localStorage.setItem('biz_id', bizId);
     localStorage.setItem('pinned_biz_code', biz?.code || '');
     
-    // Day-Zero Bootstrap: fetch essential entities immediately
-    await syncBootstrapData(authData.user.id);
+    await syncBootstrapData(bizId);
+    await refreshAuth();
     
     return biz;
   };
 
   const syncBootstrapData = async (bizId: string) => {
     try {
-      console.log('[Bootstrap] Initializing State Sync for Business:', bizId);
+      console.log('[Bootstrap] Initializing High-Fidelity State Sync for:', bizId);
       
-      // 1. Fetch Branches
-      const { data: branches } = await supabase.from('branches').select('*').eq('business_id', bizId);
-      if (branches) {
-        await db.branches.bulkPut(branches.map(b => ({
-          id: b.id,
-          businessId: b.business_id,
-          name: b.name
-        })));
+      const tables = [
+        'branches', 'staff', 'suppliers', 'products', 
+        'sales', 'expenses', 'purchases', 'shifts', 
+        'cash_logs', 'settings'
+      ];
+
+      for (const table of tables) {
+        const { data, error } = await supabase.from(table).select('*').eq('business_id', bizId);
+        if (error) {
+          console.warn(`[Bootstrap] Failed to fetch ${table}:`, error.message);
+          continue;
+        }
+        if (data && data.length > 0) {
+          // Map snake_case to camelCase where necessary
+          const mappedData = data.map(item => {
+            const mapped: Record<string, unknown> = {};
+            for (const [key, value] of Object.entries(item as Record<string, unknown>)) {
+              const camelKey = key.replace(/_([a-z])/g, (g) => g[1].toUpperCase())
+                                .replace('businessId', 'businessId') // keep businessId
+                                .replace('branchId', 'branchId')
+                                .replace('staffId', 'staffId')
+                                .replace('supplierId', 'supplierId');
+              mapped[camelKey] = value;
+              // Fix some common mismatches
+              if (key === 'business_id') mapped.businessId = value;
+              if (key === 'branch_id') mapped.branchId = value;
+              if (key === 'staff_id') mapped.staffId = value;
+              if (key === 'supplier_id') mapped.supplierId = value;
+              if (key === 'package_id') mapped.packageId = value;
+              if (key === 'expiry_date') mapped.expiryDate = Number(value);
+              if (key === 'trial_used') mapped.trialUsed = value;
+              if (key === 'suspended_revenue_count') mapped.suspendedRevenueCount = value;
+              if (key === 'staff_count') mapped.staffCount = value;
+              if (key === 'mpesa_config') mapped.mpesaConfig = value;
+              if (key === 'enabled_features') mapped.enabledFeatures = value;
+              if (key === 'kra_pin') mapped.kraPin = value;
+              if (key === 'low_stock_threshold') mapped.lowStockThreshold = value;
+              if (key === 'cost_price') mapped.costPrice = value;
+            }
+            return mapped;
+          });
+
+          // Custom handling for settings
+          if (table === 'settings') {
+             await db.settings.bulkPut(mappedData.map(s => ({ key: s.key as string, value: s.value })));
+          } else {
+             // eslint-disable-next-line @typescript-eslint/no-explicit-any
+             await (db as any)[table].bulkPut(mappedData);
+          }
+        }
       }
 
-      // 2. Fetch All Staff
-      const { data: staff } = await supabase.from('staff').select('*').eq('business_id', bizId);
-      if (staff) {
-        await db.staff.bulkPut(staff.map(s => ({
-          id: s.id,
-          businessId: s.business_id,
-          branchId: s.branch_id,
-          code: s.code,
-          pin: s.pin,
-          firstName: s.first_name,
-          lastName: s.last_name,
-          phoneNumber: s.phone_number,
-          idNumber: s.id_number,
-          status: s.status,
-          role: s.role
-        })));
+      // CRITICAL: Fetch the latest event to set the cursor
+      const { data: lastEvent } = await supabase
+        .from('pos_events')
+        .select('server_timestamp')
+        .eq('business_id', bizId)
+        .order('server_timestamp', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (lastEvent?.server_timestamp) {
+        await db.settings.put({ key: 'last_synced', value: Number(lastEvent.server_timestamp) });
+        console.log('[Bootstrap] Sync cursor established at:', lastEvent.server_timestamp);
       }
 
-      // 3. Fetch Suppliers
-      const { data: suppliers } = await supabase.from('suppliers').select('*').eq('business_id', bizId);
-      if (suppliers) {
-        await db.suppliers.bulkPut(suppliers.map(s => ({
-          id: s.id,
-          businessId: s.business_id,
-          name: s.name,
-          contactPerson: s.contact_person,
-          phone: s.phone,
-          email: s.email,
-          kraPin: s.kra_pin
-        })));
-      }
-      
-      console.log('[Bootstrap] Day-Zero State Loaded Successfully');
+      localStorage.setItem('initial_sync_done', 'true');
+      console.log('[Bootstrap] Full State Recovery Complete');
     } catch (err) {
-      console.warn('[Bootstrap] Semi-failure during entity pre-fetch:', err);
-      // Non-blocking failure; the event materializer will eventually catch up
+      console.error('[Bootstrap] Critical failure during data fetch:', err);
     }
   };
 
@@ -333,7 +246,6 @@ export function useAuth() {
 
     if (navigator.onLine) {
       try {
-        // Enforce cloud verification to protect against offline PIN spoofing/revoked access
         const { data, error } = await supabase.rpc('verify_staff_online', {
           p_business_id: bizId,
           p_code: staffCode.trim(),
@@ -344,7 +256,6 @@ export function useAuth() {
         isValid = data === true;
         
         if (isValid) {
-          // Cloud validated. Fetch raw node to cache 
           const { data: cloudStaff } = await supabase
             .from('staff')
             .select('*')
@@ -365,7 +276,6 @@ export function useAuth() {
               status: cloudStaff.status,
               branchId: cloudStaff.branch_id
             };
-            // Cache locally and reset 48-hour deadman switch
             await db.staff.put(staffRecord);
             localStorage.setItem(`staff_auth_time_${staffRecord.id}`, Date.now().toString());
           }
@@ -375,19 +285,17 @@ export function useAuth() {
       }
     }
 
-    // Fallback or Offline Execution
     if (!staffRecord) {
       staffRecord = await db.staff
         .where({ businessId: bizId, code: staffCode.trim(), pin: pin.trim() })
         .first();
       
       if (staffRecord) {
-         // Security dead-man switch: Force an online sync every 48 hours for staff
          const lastAuthTime = parseInt(localStorage.getItem(`staff_auth_time_${staffRecord.id}`) || '0', 10);
          const hoursSinceAuth = (Date.now() - lastAuthTime) / (1000 * 60 * 60);
          
          if (hoursSinceAuth > 48) {
-           throw new Error('Offline shift limit reached. Please connect to the internet to initialize this register.');
+           throw new Error('Offline shift limit reached. Please connect to the internet.');
          }
          isValid = true;
       }
@@ -395,12 +303,9 @@ export function useAuth() {
 
     if (!isValid || !staffRecord) throw new Error('Invalid Staff Code or PIN');
 
-    setStaffIdState(staffRecord.id);
-    setUserType('staff');
     localStorage.setItem('staff_id', staffRecord.id);
-
-    // Bootstrap for staff too so they have branch context/suppliers immediately
     await syncBootstrapData(bizId);
+    await refreshAuth();
 
     return staffRecord;
   };
@@ -410,20 +315,15 @@ export function useAuth() {
     localStorage.removeItem('biz_id');
     localStorage.removeItem('staff_id');
     localStorage.removeItem('pinned_biz_code');
-    setBizIdState(null);
-    setStaffIdState(null);
-    setUserType(null);
+    localStorage.removeItem('initial_sync_done');
+    await refreshAuth();
     window.location.reload();
   };
 
-  const businessId = currentBusiness?.id || currentStaff?.businessId || localStorage.getItem('biz_id');
-  const branchId = currentStaff?.branchId || localStorage.getItem('branch_id');
-  const staffId = currentStaff?.id || localStorage.getItem('staff_id');
-
   return { 
     userType,
-    business: currentBusiness, 
-    staff: currentStaff, 
+    business, 
+    staff, 
     branches,
     businessId,
     branchId,
