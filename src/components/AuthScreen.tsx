@@ -233,9 +233,11 @@ export function AuthScreen() {
               <div className="input-icon-wrapper">
                 <input 
                   required 
-                  type="password" 
+                  type="text" 
+                  autoComplete="off"
                   maxLength={4}
-                  placeholder="••••"
+                  placeholder="0000"
+                  style={{ fontSize: '1.5rem', letterSpacing: '4px', textAlign: 'center' }}
                   value={pin} 
                   onChange={e => setPin(e.target.value.replace(/\D/g, ''))} 
                 />
@@ -249,9 +251,11 @@ export function AuthScreen() {
                 <div className="input-icon-wrapper">
                   <input 
                     required 
-                    type="password" 
+                    type="text" 
+                    autoComplete="off"
                     maxLength={4}
-                    placeholder="••••"
+                    placeholder="0000"
+                    style={{ fontSize: '1.5rem', letterSpacing: '4px', textAlign: 'center' }}
                     value={confirmPin} 
                     onChange={e => setConfirmPin(e.target.value.replace(/\D/g, ''))} 
                   />

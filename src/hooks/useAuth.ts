@@ -145,7 +145,8 @@ export function useAuth() {
             mpesaConfig: remoteBiz.mpesa_config || undefined,
             telephone: remoteBiz.telephone || '',
             address: remoteBiz.address || '',
-            kraPin: remoteBiz.kra_pin || ''
+            kraPin: remoteBiz.kra_pin || '',
+            logo: remoteBiz.logo || undefined
           };
           await db.businesses.put(newBiz);
        }
@@ -165,53 +166,81 @@ export function useAuth() {
       console.log('[Bootstrap] Initializing High-Fidelity State Sync for:', bizId);
       
       const tables = [
-        'branches', 'staff', 'suppliers', 'products', 
+        'businesses', 'branches', 'staff', 'suppliers', 'products', 
         'sales', 'expenses', 'purchases', 'shifts', 
-        'cash_logs', 'settings'
+        'cash_logs', 'settings', 'recurring_expenses', 'counters',
+        'inventory_ledger', 'carts'
       ];
 
       for (const table of tables) {
-        const { data, error } = await supabase.from(table).select('*').eq('business_id', bizId);
-        if (error) {
-          console.warn(`[Bootstrap] Failed to fetch ${table}:`, error.message);
-          continue;
-        }
-        if (data && data.length > 0) {
-          // Map snake_case to camelCase where necessary
-          const mappedData = data.map(item => {
-            const mapped: Record<string, unknown> = {};
-            for (const [key, value] of Object.entries(item as Record<string, unknown>)) {
-              const camelKey = key.replace(/_([a-z])/g, (g) => g[1].toUpperCase())
-                                .replace('businessId', 'businessId') // keep businessId
-                                .replace('branchId', 'branchId')
-                                .replace('staffId', 'staffId')
-                                .replace('supplierId', 'supplierId');
-              mapped[camelKey] = value;
-              // Fix some common mismatches
-              if (key === 'business_id') mapped.businessId = value;
-              if (key === 'branch_id') mapped.branchId = value;
-              if (key === 'staff_id') mapped.staffId = value;
-              if (key === 'supplier_id') mapped.supplierId = value;
-              if (key === 'package_id') mapped.packageId = value;
-              if (key === 'expiry_date') mapped.expiryDate = Number(value);
-              if (key === 'trial_used') mapped.trialUsed = value;
-              if (key === 'suspended_revenue_count') mapped.suspendedRevenueCount = value;
-              if (key === 'staff_count') mapped.staffCount = value;
-              if (key === 'mpesa_config') mapped.mpesaConfig = value;
-              if (key === 'enabled_features') mapped.enabledFeatures = value;
-              if (key === 'kra_pin') mapped.kraPin = value;
-              if (key === 'low_stock_threshold') mapped.lowStockThreshold = value;
-              if (key === 'cost_price') mapped.costPrice = value;
-            }
-            return mapped;
-          });
+        let hasMore = true;
+        let page = 0;
+        const pageSize = 1000;
 
-          // Custom handling for settings
-          if (table === 'settings') {
-             await db.settings.bulkPut(mappedData.map(s => ({ key: s.key as string, value: s.value })));
+        while (hasMore) {
+          const { data, error } = await supabase
+            .from(table)
+            .select('*')
+            .eq('business_id', bizId)
+            .range(page * pageSize, (page + 1) * pageSize - 1);
+
+          if (error) {
+            console.warn(`[Bootstrap] Failed to fetch ${table} (page ${page}):`, error.message);
+            hasMore = false;
+            continue;
+          }
+
+          if (data && data.length > 0) {
+            // Map snake_case to camelCase where necessary
+            const mappedData = data.map(item => {
+              const mapped: Record<string, unknown> = {};
+              for (const [key, value] of Object.entries(item as Record<string, unknown>)) {
+                const camelKey = key.replace(/_([a-z])/g, (g) => g[1].toUpperCase())
+                                  .replace('businessId', 'businessId') // keep businessId
+                                  .replace('branchId', 'branchId')
+                                  .replace('staffId', 'staffId')
+                                  .replace('supplierId', 'supplierId');
+                mapped[camelKey] = value;
+                // Fix some common mismatches
+                if (key === 'business_id') mapped.businessId = value;
+                if (key === 'branch_id') mapped.branchId = value;
+                if (key === 'staff_id') mapped.staffId = value;
+                if (key === 'supplier_id') mapped.supplierId = value;
+                if (key === 'package_id') mapped.packageId = value;
+                if (key === 'expiry_date') mapped.expiryDate = Number(value);
+                if (key === 'trial_used') mapped.trialUsed = value;
+                if (key === 'suspended_revenue_count') mapped.suspendedRevenueCount = value;
+                if (key === 'staff_count') mapped.staffCount = value;
+                if (key === 'mpesa_config') mapped.mpesaConfig = value;
+                if (key === 'enabled_features') mapped.enabledFeatures = value;
+                if (key === 'kra_pin') mapped.kraPin = value;
+                if (key === 'low_stock_threshold') mapped.lowStockThreshold = value;
+                if (key === 'cost_price') mapped.costPrice = value;
+                if (key === 'entity_type') mapped.entityType = value;
+                if (key === 'is_active') mapped.isActive = value;
+                if (key === 'next_run') mapped.nextRun = value;
+                if (key === 'recorded_at') mapped.recordedAt = Number(value);
+                if (key === 'trace_id') mapped.traceId = value;
+                if (key === 'updated_at') mapped.updatedAt = Number(value);
+              }
+              return mapped;
+            });
+
+            // Custom handling for settings
+            if (table === 'settings') {
+               await db.settings.bulkPut(mappedData.map(s => ({ key: s.key as string, value: s.value })));
+            } else {
+               // eslint-disable-next-line @typescript-eslint/no-explicit-any
+               await (db as any)[table].bulkPut(mappedData);
+            }
+
+            if (data.length < pageSize) {
+              hasMore = false;
+            } else {
+              page++;
+            }
           } else {
-             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-             await (db as any)[table].bulkPut(mappedData);
+            hasMore = false;
           }
         }
       }
@@ -311,13 +340,27 @@ export function useAuth() {
   };
 
   const logout = async () => {
-    await supabase.auth.signOut();
-    localStorage.removeItem('biz_id');
-    localStorage.removeItem('staff_id');
-    localStorage.removeItem('pinned_biz_code');
-    localStorage.removeItem('initial_sync_done');
-    await refreshAuth();
-    window.location.reload();
+    try {
+      await supabase.auth.signOut();
+      
+      // Clear local database to prevent cross-contamination
+      await db.transaction('rw', db.tables, async () => {
+        await Promise.all(db.tables.map(table => table.clear()));
+      });
+
+      localStorage.removeItem('biz_id');
+      localStorage.removeItem('staff_id');
+      localStorage.removeItem('pinned_biz_code');
+      localStorage.removeItem('initial_sync_done');
+      
+      await refreshAuth();
+      window.location.reload();
+    } catch (err) {
+      console.error('Logout error:', err);
+      // Fallback: still clear storage and reload
+      localStorage.clear();
+      window.location.reload();
+    }
   };
 
   return { 

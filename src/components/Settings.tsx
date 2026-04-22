@@ -409,12 +409,13 @@ export function Settings() {
             <div className="input-group" style={{ maxWidth: '300px' }}>
               <label>Set 4-Digit Owner PIN</label>
               <input 
-                type="password" 
+                type="text" 
+                autoComplete="off"
                 maxLength={4}
                 value={ownerPin} 
-                onChange={(e) => setOwnerPin(e.target.value.replace(/[^0-9]/g, ''))} 
+                onChange={(e) => setOwnerPin(e.target.value.replace(/\D/g, ''))} 
                 placeholder="0000"
-                style={{ fontSize: '1.25rem', letterSpacing: '0.5rem', textAlign: 'center' }}
+                style={{ fontSize: '1.5rem', letterSpacing: '4px', textAlign: 'center', background: '#f8fafc', border: '2px solid var(--primary)' }}
               />
             </div>
           )}

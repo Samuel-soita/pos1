@@ -1,5 +1,5 @@
-import { useState, useCallback } from 'react';
-import { db, type Product, type SplitPayment } from '../db/db';
+import { useCallback } from 'react';
+import { db, type Product, type SplitPayment, type SaleItem } from '../db/db';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { generateTraceableId, getDeviceId } from '../utils/idUtils';
 import { generateEventHash } from '../utils/hashUtils';
@@ -8,20 +8,51 @@ import { useCashControl } from './useCashControl';
 import { useShifts } from './useShifts';
 import { useSubscription } from './useSubscription';
 
-export interface CartItem {
-  id: string;
-  name: string;
-  price: number;
-  costPrice: number;
-  quantity: number;
-}
-
 export function useSales() {
-  const [cart, setCart] = useState<CartItem[]>([]);
   const { businessId, business, branchId, userType, staffId } = useAuth();
   const { isRegisterOpen } = useCashControl();
   const { recordSaleToShift, recordVoidToShift } = useShifts();
   const { isLocked, message: subMessage } = useSubscription();
+
+  // 1. Reactive Cart Source of Truth (Synced via DB)
+  const cartRecord = useLiveQuery(async () => {
+    if (!businessId) return null;
+    const id = `${businessId}_${staffId || 'OWNER'}`;
+    return await db.carts.get(id);
+  }, [businessId, staffId]);
+
+  const cart = cartRecord?.items || [];
+
+  // Helper to persist cart changes and trigger sync
+  const persistCart = useCallback(async (newItems: SaleItem[]) => {
+    if (!businessId) return;
+    const id = `${businessId}_${staffId || 'OWNER'}`;
+    
+    await db.carts.put({
+      id,
+      businessId,
+      staffId: staffId || 'OWNER',
+      items: newItems,
+      updatedAt: Date.now()
+    });
+
+    // Also record as a syncable event so other devices get it
+    const eventPayload = { cartId: id, items: newItems };
+    const eventHash = await generateEventHash(eventPayload);
+    const bCode = business?.code || 'UNKN';
+
+    await db.pos_events.add({
+      event_id: await generateTraceableId('EVT', businessId, bCode, 'SYNC'),
+      business_id: businessId,
+      staff_id: staffId || 'OWNER',
+      event_type: 'CART_UPDATED',
+      payload: eventPayload,
+      client_timestamp: Date.now(),
+      server_timestamp: Date.now(),
+      hash: eventHash,
+      sync_status: 'pending'
+    });
+  }, [businessId, staffId, business?.code]);
 
   const sales = useLiveQuery(async () => {
     if (!businessId) return [];
@@ -41,57 +72,61 @@ export function useSales() {
   const addToCart = useCallback(async (product: Product) => {
     if (!product.id) return;
     
-    // Hard Stock Lockdown
     const latestProduct = await db.products.get(product.id);
     if (!latestProduct || latestProduct.quantity <= 0) {
       alert(`Product ${product.name} is out of stock!`);
       return;
     }
 
-    setCart(prev => {
-      const existing = prev.find(item => item.id === product.id);
-      if (existing) {
-        if (existing.quantity >= latestProduct.quantity) {
-          alert(`Only ${latestProduct.quantity} units remaining in stock.`);
-          return prev;
-        }
-        return prev.map(item =>
-          item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item
-        );
+    const existing = cart.find(item => item.productId === product.id);
+    let newCart: SaleItem[];
+
+    if (existing) {
+      if (existing.quantity >= latestProduct.quantity) {
+        alert(`Only ${latestProduct.quantity} units remaining in stock.`);
+        return;
       }
-      return [...prev, { 
-        id: product.id!, 
+      newCart = cart.map(item =>
+        item.productId === product.id ? { ...item, quantity: item.quantity + 1 } : item
+      );
+    } else {
+      newCart = [...cart, { 
+        productId: product.id!, 
         name: product.name, 
         price: product.price, 
         costPrice: product.costPrice ?? (product.price * 0.7),
         quantity: 1 
       }];
-    });
-  }, []);
+    }
+    
+    await persistCart(newCart);
+  }, [cart, persistCart]);
 
-  const removeFromCart = useCallback((id: string) => {
-    setCart(prev => prev.filter(item => item.id !== id));
-  }, []);
+  const removeFromCart = useCallback(async (id: string) => {
+    const newCart = cart.filter(item => item.productId !== id);
+    await persistCart(newCart);
+  }, [cart, persistCart]);
 
   const updateCartQuantity = useCallback(async (id: string, quantity: number) => {
     if (quantity <= 0) {
-      setCart(prev => prev.filter(item => item.id !== id));
+      const newCart = cart.filter(item => item.productId !== id);
+      await persistCart(newCart);
       return;
     }
     
-    // Hard Stock Lockdown
     const product = await db.products.get(id);
     if (product && quantity > product.quantity) {
       alert(`Only ${product.quantity} units available.`);
       return;
     }
 
-    setCart(prev =>
-      prev.map(item => (item.id === id ? { ...item, quantity } : item))
-    );
-  }, []);
+    const newCart = cart.map(item => (item.productId === id ? { ...item, quantity } : item));
+    await persistCart(newCart);
+  }, [cart, persistCart]);
 
-  const clearCart = useCallback(() => setCart([]), []);
+  const clearCart = useCallback(async () => {
+    await persistCart([]);
+  }, [persistCart]);
 
   const completeSale = useCallback(async (taxRate: number = 0, taxAmount: number = 0, paymentMethod: string = 'Cash', transactionCode?: string, splitPayments?: SplitPayment[]) => {
     if (cart.length === 0 || !businessId) return;
@@ -114,32 +149,21 @@ export function useSales() {
       return { success: false, error: 'BUSINESS_CONTEXT_MISSING' };
     }
 
-    // Capture stable references for closure type safety
     const bId = businessId;
     const bCode = business.code;
-
     const timestamp = Date.now();
     const deviceId = await getDeviceId();
     const saleId = await generateTraceableId('ORD', bId, bCode, deviceId);
     const receiptId = saleId; 
 
-    const saleItems = cart.map(item => ({
-      productId: item.id,
-      name: item.name,
-      quantity: item.quantity,
-      price: item.price,
-      costPrice: item.costPrice,
-    }));
-
     try {
-      await db.transaction('rw', [db.products, db.sales, db.pos_events, db.snapshots, db.counters, db.settings, db.shifts, db.inventory_ledger], async () => {
-        // 1. Immutable Event Generation (Sale)
+      await db.transaction('rw', [db.products, db.sales, db.pos_events, db.snapshots, db.counters, db.settings, db.shifts, db.inventory_ledger, db.carts], async () => {
         const salePayload = {
            id: saleId,
            total,
            totalProfit,
            receiptId,
-           items: saleItems,
+           items: cart,
            taxRate,
            taxAmount,
            paymentMethod,
@@ -150,7 +174,6 @@ export function useSales() {
         };
         
         const saleHash = await generateEventHash(salePayload);
-
         const saleEvent = {
           event_id: await generateTraceableId('EVT', bId, bCode, deviceId),
           business_id: bId,
@@ -164,7 +187,6 @@ export function useSales() {
         };
         await db.pos_events.add(saleEvent);
 
-        // 2. Compute state change locally for instant UI response (Sales Snapshot)
         await db.sales.add({
           id: saleId,
           businessId,
@@ -172,7 +194,7 @@ export function useSales() {
           totalProfit,
           timestamp,
           receiptId,
-          items: saleItems,
+          items: cart,
           taxRate,
           taxAmount,
           paymentMethod,
@@ -184,64 +206,57 @@ export function useSales() {
           syncStatus: 'synced'
         });
         
-            for (const item of cart) {
-              const product = await db.products.get(item.id);
-              
-              if (!product || product.quantity < item.quantity) {
-                throw new Error(`CRITICAL: ${item.name} went out of stock! Another device or tab might have sold it.`);
-              }
+        for (const item of cart) {
+          const product = await db.products.get(item.productId);
+          
+          if (!product || product.quantity < item.quantity) {
+            throw new Error(`CRITICAL: ${item.name} went out of stock!`);
+          }
 
-              const stockPayload = { 
-                productId: item.id, 
-                delta: -item.quantity,
-                branchId: branchId || product.branchId
-              };
-              const stockHash = await generateEventHash(stockPayload);
+          const stockPayload = { productId: item.productId, delta: -item.quantity, branchId: branchId || product.branchId };
+          const stockHash = await generateEventHash(stockPayload);
 
-              await db.pos_events.add({
-                event_id: await generateTraceableId('EVT', bId, bCode, deviceId),
-                business_id: bId,
-                staff_id: staffId || 'UNKNOWN',
-                event_type: 'STOCK_RESERVED',
-                payload: stockPayload,
-                client_timestamp: timestamp,
-                server_timestamp: timestamp,
-                hash: stockHash,
-                sync_status: 'pending'
-              });
+          await db.pos_events.add({
+            event_id: await generateTraceableId('EVT', bId, bCode, deviceId),
+            business_id: bId,
+            staff_id: staffId || 'UNKNOWN',
+            event_type: 'STOCK_RESERVED',
+            payload: stockPayload,
+            client_timestamp: timestamp,
+            server_timestamp: timestamp,
+            hash: stockHash,
+            sync_status: 'pending'
+          });
 
-              await db.products.update(item.id, {
-                quantity: Math.round((product.quantity - item.quantity) * 100) / 100,
-                updatedAt: Date.now()
-              });
+          await db.products.update(item.productId, {
+            quantity: Math.round((product.quantity - item.quantity) * 100) / 100,
+            updatedAt: Date.now()
+          });
 
-              await db.inventory_ledger.add({
-                id: await generateTraceableId('INV', bId, bCode, deviceId),
-                businessId: bId,
-                productId: item.id,
-                action: 'SALE',
-                quantity: -item.quantity,
-                recordedAt: timestamp,
-                syncStatus: 'synced'
-              });
-            }
-
-            await recordSaleToShift(total, paymentMethod, splitPayments);
-            
-        if (business.status === 'suspended') {
-          await db.businesses.update(bId, {
-            suspendedRevenueCount: (business.suspendedRevenueCount || 0) + 1
+          await db.inventory_ledger.add({
+            id: await generateTraceableId('INV', bId, bCode, deviceId),
+            businessId: bId,
+            productId: item.productId,
+            action: 'SALE',
+            quantity: -item.quantity,
+            recordedAt: timestamp,
+            syncStatus: 'synced'
           });
         }
+
+        await recordSaleToShift(total, paymentMethod, splitPayments);
+        
+        // Clear cart in DB
+        const cartId = `${bId}_${staffId || 'OWNER'}`;
+        await db.carts.update(cartId, { items: [], updatedAt: Date.now() });
       });
 
-      clearCart();
       return { success: true, receiptId };
     } catch (error) {
       console.error('Sale transaction failed:', error);
       return { success: false, error };
     }
-  }, [cart, businessId, isRegisterOpen, isLocked, subMessage, business, branchId, staffId, recordSaleToShift, clearCart]);
+  }, [cart, businessId, isRegisterOpen, isLocked, subMessage, business, branchId, staffId, recordSaleToShift]);
 
   const voidSale = useCallback(async (saleId: string, reason: string) => {
     if (!businessId || !business) return;
