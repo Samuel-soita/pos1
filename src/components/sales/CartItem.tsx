@@ -2,7 +2,7 @@ import { memo } from 'react';
 import { Plus, Minus, Trash2 } from 'lucide-react';
 
 interface CartItemProps {
-  item: { id: string; name: string; price: number; quantity: number };
+  item: { productId: string; name: string; price: number; quantity: number };
   onUpdateQuantity: (id: string, quantity: number) => void;
   onRemove: (id: string) => void;
 }
@@ -17,21 +17,21 @@ export const CartItem = memo(({ item, onUpdateQuantity, onRemove }: CartItemProp
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
         <div style={{ display: 'flex', alignItems: 'center', border: '1px solid var(--border)', borderRadius: '6px', overflow: 'hidden', background: 'white' }}>
           <button 
-            onClick={(e) => { e.stopPropagation(); onUpdateQuantity(item.id, item.quantity - 1); }} 
+            onClick={(e) => { e.stopPropagation(); onUpdateQuantity(item.productId, item.quantity - 1); }} 
             style={{ padding: '2px 6px', borderRadius: 0, background: 'transparent', minHeight: '32px' }}
           >
             <Minus size={12} />
           </button>
           <span style={{ padding: '0 6px', fontWeight: 600, fontSize: '0.85rem' }}>{item.quantity}</span>
           <button 
-            onClick={(e) => { e.stopPropagation(); onUpdateQuantity(item.id, item.quantity + 1); }} 
+            onClick={(e) => { e.stopPropagation(); onUpdateQuantity(item.productId, item.quantity + 1); }} 
             style={{ padding: '2px 6px', borderRadius: 0, background: 'transparent', minHeight: '32px' }}
           >
             <Plus size={12} />
           </button>
         </div>
         <button 
-          onClick={(e) => { e.stopPropagation(); onRemove(item.id); }} 
+          onClick={(e) => { e.stopPropagation(); onRemove(item.productId); }} 
           style={{ color: 'var(--danger)', padding: '6px', background: 'transparent', minHeight: '32px' }}
         >
           <Trash2 size={16} />

@@ -133,13 +133,14 @@ export function Layout({ children, activeTab, setActiveTab }: LayoutProps) {
             <p style={{ color: 'var(--text-muted)', marginBottom: '24px' }}>Enter the 4-digit Owner PIN to access this feature.</p>
             <div className="input-group">
               <input
-                type="password"
+                type="text"
+                autoComplete="off"
                 maxLength={4}
                 autoFocus
                 value={pinInput}
-                onChange={e => setPinInput(e.target.value)}
+                onChange={e => setPinInput(e.target.value.replace(/\D/g, ''))}
                 onKeyDown={e => e.key === 'Enter' && handlePinSubmit()}
-                style={{ fontSize: '2rem', letterSpacing: '1rem', textAlign: 'center' }}
+                style={{ fontSize: '2rem', letterSpacing: '1rem', textAlign: 'center', background: '#f1f5f9', border: '2px solid var(--primary)' }}
               />
             </div>
             <button className="btn-primary" style={{ width: '100%', marginTop: '16px' }} onClick={handlePinSubmit}>

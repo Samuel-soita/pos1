@@ -174,6 +174,14 @@ export interface RecurringExpense {
   branchId?: string;
 }
 
+export interface Cart {
+  id: string; // businessId_staffId (one active cart per person)
+  businessId: string;
+  staffId: string;
+  items: SaleItem[];
+  updatedAt: number;
+}
+
 export interface Business {
   id: string; // UUID (links to Supabase Auth UID)
   name: string;
@@ -183,6 +191,7 @@ export interface Business {
   telephone?: string;
   address?: string;
   kraPin?: string;
+  logo?: string; // Base64 logo
   packageId: string; // Dynamic package identifiers for custom plans
   expiryDate: number;
   status: 'trial' | 'grace' | 'active' | 'pending_payment' | 'suspended' | 'pending_verification';
@@ -248,9 +257,10 @@ const db = new Dexie('POSDatabase') as Dexie & {
   inventory_ledger: EntityTable<InventoryLedgerEvent, 'id'>;
   pos_events: EntityTable<POSEvent, 'event_id'>;
   snapshots: EntityTable<MaterializedSnapshot, 'id'>;
+  carts: EntityTable<Cart, 'id'>;
 };
 
-db.version(25).stores({
+db.version(26).stores({
   products: 'id, businessId, branchId, name, price, costPrice, quantity, category, barcode, syncStatus',
   sales: 'id, businessId, [businessId+branchId], [businessId+timestamp], [branchId+timestamp], total, totalProfit, timestamp, receiptId, paymentMethod, deviceId, syncStatus',
   purchases: 'id, businessId, branchId, supplierId, total, timestamp, syncStatus',
@@ -266,7 +276,8 @@ db.version(25).stores({
   counters: 'id, businessId, entityType',
   inventory_ledger: 'id, businessId, productId, recordedAt, traceId, [productId+businessId], syncStatus',
   pos_events: 'event_id, business_id, event_type, server_timestamp, sync_status, retry_count',
-  snapshots: 'id, business_id, view_type'
+  snapshots: 'id, business_id, view_type',
+  carts: 'id, businessId, staffId, updatedAt'
 });
 
 export { db };

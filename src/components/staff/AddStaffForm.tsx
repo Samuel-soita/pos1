@@ -83,11 +83,12 @@ export function AddStaffForm({ branches, onSubmit, loading }: AddStaffFormProps)
         <FormInput 
           label="Assign 4-Digit Login PIN"
           required
-          type="password"
+          type="text"
           maxLength={4}
           value={formData.pin}
           onChange={e => setFormData({...formData, pin: e.target.value.replace(/\D/g, '')})}
-          placeholder="••••"
+          placeholder="0000"
+          style={{ fontSize: '1.25rem', letterSpacing: '4px', textAlign: 'center', background: '#f8fafc', border: '2px solid var(--primary)' }}
         />
 
         <div className="input-group">

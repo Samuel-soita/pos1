@@ -109,13 +109,22 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
         const eventIds = pendingBatch.map(e => e.event_id);
         await db.pos_events.where('event_id').anyOf(eventIds).modify({ sync_status: 'synced' });
 
+        // CRITICAL: Broadcast to other devices that we pushed changes
+        if (channelRef.current) {
+          channelRef.current.send({
+            type: 'broadcast',
+            event: 'REMOTE_CHANGE_DETECTED',
+            payload: { source: staffId || 'OWNER' }
+          });
+        }
+
       } catch (err: unknown) {
         console.error('Event Push failure:', err);
         setSyncError(err instanceof Error ? err.message : String(err));
         continue; 
       }
     }
-  }, [businessId]);
+  }, [businessId, staffId]);
 
   const pullRemoteChanges = useCallback(async () => {
     if (!businessId) return;
@@ -187,7 +196,8 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
           db.pos_events, db.products, db.sales, db.expenses, 
           db.shifts, db.cash_logs, db.staff, db.branches, 
           db.recurring_expenses, db.snapshots, db.settings,
-          db.inventory_ledger, db.businesses, db.suppliers, db.purchases
+          db.inventory_ledger, db.businesses, db.suppliers, db.purchases,
+          db.counters, db.carts
         ], async () => {
           await db.pos_events.bulkPut(mappedEvents);
 
@@ -435,6 +445,18 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
               case 'SETTING_UPDATED':
                 await db.settings.put({ key: payload.key, value: payload.value });
                 break;
+              case 'COUNTER_UPDATED':
+                await db.counters.put(payload);
+                break;
+              case 'CART_UPDATED':
+                await db.carts.put({
+                  id: payload.cartId,
+                  businessId: evt.business_id,
+                  staffId: evt.staff_id,
+                  items: payload.items,
+                  updatedAt: evt.client_timestamp
+                });
+                break;
             }
           }
 
@@ -455,7 +477,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
 
       const { data: remoteBiz } = await supabase
         .from('businesses')
-        .select('package_id, expiry_date, status, staff_count, custom_feature_count, enabled_features, staff_permissions, trial_used, suspended_revenue_count')
+        .select('package_id, expiry_date, status, staff_count, custom_feature_count, enabled_features, staff_permissions, trial_used, suspended_revenue_count, logo')
         .eq('id', bizId)
         .maybeSingle();
 
@@ -515,7 +537,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
         db.products, db.sales, db.expenses, db.shifts, 
         db.cash_logs, db.staff, db.branches, db.recurring_expenses, 
         db.snapshots, db.settings, db.inventory_ledger, db.suppliers, db.purchases,
-        db.pos_events
+        db.pos_events, db.businesses, db.counters, db.carts
       ], async () => {
         await db.pos_events.where('business_id').equals(businessId).delete();
         await db.products.clear();
@@ -530,6 +552,9 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
         await db.inventory_ledger.clear();
         await db.suppliers.clear();
         await db.purchases.clear();
+        await db.businesses.clear();
+        await db.counters.clear();
+        await db.carts.clear();
         await db.settings.where('key').equals('last_synced').delete();
       });
 
@@ -568,7 +593,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
           filter: `business_id=eq.${businessId}`
         },
         () => {
-          console.log('[Sync] Remote event detected. Syncing...');
+          console.log('[Sync] Remote event (DB) detected. Syncing...');
           syncAll();
         }
       )
@@ -585,6 +610,12 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
           syncAll();
         }
       )
+      .on('broadcast', { event: 'REMOTE_CHANGE_DETECTED' }, ({ payload }) => {
+        if (payload.source !== (staffId || 'OWNER')) {
+          console.log('[Sync] Remote change (Broadcast) detected. Instant sync triggered.');
+          syncAll();
+        }
+      })
       .on('presence', { event: 'sync' }, () => {
         const state = channel.presenceState();
         setActiveTerminals(Object.keys(state).length);
@@ -676,6 +707,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
     if (remote.staff_permissions !== undefined) mapped.staffPermissions = remote.staff_permissions;
     if (remote.suspended_revenue_count !== undefined) mapped.suspendedRevenueCount = remote.suspended_revenue_count;
     if (remote.mpesa_config !== undefined) mapped.mpesaConfig = remote.mpesa_config;
+    if (remote.logo !== undefined) mapped.logo = remote.logo;
     
     const snakeKeys = [
       'package_id', 'expiry_date', 'trial_used', 'staff_count', 
