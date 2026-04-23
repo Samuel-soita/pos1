@@ -160,6 +160,7 @@ export function useSales() {
       await db.transaction('rw', [db.products, db.sales, db.pos_events, db.snapshots, db.counters, db.settings, db.shifts, db.inventory_ledger, db.carts], async () => {
         const salePayload = {
            id: saleId,
+           businessId: bId,
            total,
            totalProfit,
            receiptId,

@@ -18,7 +18,7 @@ import { StatsCard } from './shared/StatsCard';
 import { TableSkeleton } from './LoadingSkeleton';
 
 export function Expenses({ initialView }: { initialView?: string }) {
-  const { businessId, business } = useAuth();
+  const { businessId, business, branchId, userType } = useAuth();
   const { requestAuth } = useLayout();
   const { recordExpenseToShift } = useShifts();
 
@@ -31,12 +31,17 @@ export function Expenses({ initialView }: { initialView?: string }) {
 
   const expenses = useLiveQuery(
     () => {
-      const query = db.expenses.orderBy('timestamp').reverse();
-      if (filter !== 'all') {
-        return db.expenses.where('status').equals(filter).reverse().sortBy('timestamp');
+      let collection = db.expenses.where('businessId').equals(businessId || '');
+      
+      if (userType === 'staff' && branchId) {
+        collection = collection.and(e => e.branchId === branchId);
       }
-      return query.toArray();
-    }, [filter]
+
+      if (filter !== 'all') {
+        return collection.and(e => e.status === filter).reverse().sortBy('timestamp');
+      }
+      return collection.reverse().sortBy('timestamp');
+    }, [filter, businessId, branchId, userType]
   ) || [];
 
   const recurring = useLiveQuery(() => db.recurring_expenses.toArray()) || [];
@@ -57,6 +62,7 @@ export function Expenses({ initialView }: { initialView?: string }) {
           receiptImage: formData.receiptImage || undefined,
           id,
           businessId: businessId,
+          branchId: branchId || undefined,
           description: '',
           timestamp: now,
           status: (isOwner ? 'verified' : 'pending') as 'verified' | 'pending',

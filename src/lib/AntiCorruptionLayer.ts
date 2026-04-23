@@ -39,10 +39,11 @@ export async function verifyLedgerIntegrity(currentBusinessId: string): Promise<
 
         if (Math.abs(product.quantity - expectedQuantity) > 0.001) {
           // Discrepancy detected. Could be due to compaction or actual corruption.
-          // If the ledger has many events and mismatch is large, it's likely corruption.
+          // Since compaction deletes old ledger events, expectedQuantity will often mismatch.
+          // We should NOT trigger a full state wipe (rebuildState) for this, as it causes massive data loss on refresh.
           if (productEvents.length > 0) {
-            console.warn(`[ACL] Inventory Mismatch: Product ${product.name} (QTY: ${product.quantity}) differs from ledger expected (${expectedQuantity}).`);
-            corruptionFound = true;
+            console.warn(`[ACL] Inventory Mismatch (Likely Compaction): Product ${product.name} (QTY: ${product.quantity}) differs from ledger expected (${expectedQuantity}). Not triggering wipe.`);
+            // corruptionFound = true; // Disabled to prevent refresh wipe bug
           }
         }
       }

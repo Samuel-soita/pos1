@@ -222,6 +222,8 @@ export function useAuth() {
                 if (key === 'recorded_at') mapped.recordedAt = Number(value);
                 if (key === 'trace_id') mapped.traceId = value;
                 if (key === 'updated_at') mapped.updatedAt = Number(value);
+                if (key === 'logo') mapped.logo = value;
+                if (key === 'staff_permissions') mapped.staffPermissions = value;
               }
               return mapped;
             });
