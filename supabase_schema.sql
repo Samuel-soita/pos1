@@ -26,6 +26,8 @@ ALTER TABLE businesses ADD COLUMN IF NOT EXISTS address TEXT;
 ALTER TABLE businesses ADD COLUMN IF NOT EXISTS kra_pin TEXT;
 ALTER TABLE businesses ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now();
 ALTER TABLE businesses ADD COLUMN IF NOT EXISTS staff_permissions JSONB DEFAULT '{"inventory": true, "expenses": true, "reports": false, "staff": false, "settings": false, "suppliers": false, "purchases": false}';
+ALTER TABLE businesses ADD COLUMN IF NOT EXISTS logo TEXT;
+
 
 -- 1.5 Payment Requests Migration
 ALTER TABLE payment_requests ADD COLUMN IF NOT EXISTS checkout_request_id TEXT;
@@ -253,6 +255,26 @@ CREATE TABLE IF NOT EXISTS mpesa_raw_callbacks (
     created_at TIMESTAMPTZ DEFAULT now()
 );
 
+-- 4.11 NEW: Carts (Cross-device shopping sessions)
+CREATE TABLE IF NOT EXISTS carts (
+    id TEXT PRIMARY KEY, -- businessId_staffId
+    business_id UUID REFERENCES businesses(id) ON DELETE CASCADE,
+    staff_id TEXT,
+    items JSONB NOT NULL DEFAULT '[]',
+    updated_at BIGINT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- 4.12 NEW: Counters (Sequential IDs)
+CREATE TABLE IF NOT EXISTS counters (
+    id TEXT PRIMARY KEY, -- businessId_entityType
+    business_id UUID REFERENCES businesses(id) ON DELETE CASCADE,
+    entity_type TEXT NOT NULL,
+    count INT NOT NULL DEFAULT 0,
+    updated_at BIGINT NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT now()
+);
+
 -- Enable RLS on audit tables
 ALTER TABLE mpesa_raw_callbacks ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS "Service role only for raw callbacks" ON mpesa_raw_callbacks;
@@ -279,6 +301,9 @@ ALTER TABLE snapshots ENABLE ROW LEVEL SECURITY;
 ALTER TABLE settings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE purchases ENABLE ROW LEVEL SECURITY;
 ALTER TABLE suppliers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE carts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE counters ENABLE ROW LEVEL SECURITY;
+
 
 -- Dynamic Policy Generator
 DO $$ 
@@ -425,6 +450,11 @@ CREATE POLICY "Tenant Isolation (Cash Logs)" ON cash_logs FOR ALL USING (busines
 
 CREATE POLICY "Tenant Isolation (Snapshots)" ON snapshots FOR ALL USING (business_id = auth.uid() OR (auth.role() = 'anon' AND business_id IS NOT NULL)) WITH CHECK (business_id = auth.uid() OR (auth.role() = 'anon' AND business_id IS NOT NULL));
 
+CREATE POLICY "Tenant Isolation (Carts)" ON carts FOR ALL USING (business_id = auth.uid() OR (auth.role() = 'anon' AND business_id IS NOT NULL)) WITH CHECK (business_id = auth.uid() OR (auth.role() = 'anon' AND business_id IS NOT NULL));
+
+CREATE POLICY "Tenant Isolation (Counters)" ON counters FOR ALL USING (business_id = auth.uid() OR (auth.role() = 'anon' AND business_id IS NOT NULL)) WITH CHECK (business_id = auth.uid() OR (auth.role() = 'anon' AND business_id IS NOT NULL));
+
+
 
 
 -- Prevent overwrite destruction on immutable financial tables for staff
@@ -543,7 +573,7 @@ CREATE TRIGGER on_payment_success
 CREATE OR REPLACE FUNCTION public.handle_new_user() 
 RETURNS trigger AS $$
 BEGIN
-  INSERT INTO public.businesses (id, name, code, status, package_id, expiry_date, pin, owner_email, staff_permissions)
+  INSERT INTO public.businesses (id, name, code, status, package_id, expiry_date, pin, owner_email, staff_permissions, logo)
   VALUES (
     new.id, 
     COALESCE(new.raw_user_meta_data->>'business_name', 'My Business'), 
@@ -553,8 +583,10 @@ BEGIN
     (extract(epoch from now()) * 1000)::bigint + (30::bigint * 24 * 60 * 60 * 1000),
     '0000',
     new.email,
-    '{"inventory": true, "expenses": true, "reports": false, "staff": false, "settings": false, "suppliers": false, "purchases": false}'::jsonb
+    '{"inventory": true, "expenses": true, "reports": false, "staff": false, "settings": false, "suppliers": false, "purchases": false}'::jsonb,
+    NULL
   ) ON CONFLICT (id) DO NOTHING;
+
   RETURN new;
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
@@ -576,7 +608,10 @@ BEGIN;
     businesses,
     sales,
     shifts,
-    cash_logs;
+    cash_logs,
+    carts,
+    counters;
+
 COMMIT;
 
 -- ==========================================
@@ -735,7 +770,9 @@ SELECT
     staff_count,
     to_timestamp(expiry_date / 1000.0) as expiry_date_human_readable,
     suspended_revenue_count,
+    logo,
     created_at
+
 FROM public.businesses
 ORDER BY created_at DESC;
 

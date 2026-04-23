@@ -28,19 +28,34 @@ export function StaffManagement({ initialView }: { initialView?: string }) {
     }
   }, [initialView]);
 
-  const { businessId, business, staffId } = useAuth();
+  const { businessId, business, staffId, branchId, userType } = useAuth();
   const { requestAuth } = useLayout();
-  const staffMembers = useLiveQuery(() => 
-    businessId ? db.staff.where('businessId').equals(businessId).toArray() : []
-  , [businessId]) || [];
+  const staffMembers = useLiveQuery(() => {
+    if (!businessId) return [];
+    let collection = db.staff.where('businessId').equals(businessId);
+    if (userType === 'staff' && branchId) {
+      collection = collection.and(s => s.branchId === branchId);
+    }
+    return collection.toArray();
+  }, [businessId, branchId, userType]) || [];
 
-  const shifts = useLiveQuery(() => 
-    businessId ? db.shifts.where('businessId').equals(businessId).reverse().sortBy('startTime') : []
-  , [businessId]) || [];
+  const shifts = useLiveQuery(() => {
+    if (!businessId) return [];
+    let collection = db.shifts.where('businessId').equals(businessId);
+    if (userType === 'staff' && branchId) {
+      collection = collection.and(s => s.branchId === branchId);
+    }
+    return collection.reverse().sortBy('startTime');
+  }, [businessId, branchId, userType]) || [];
 
-  const branches = useLiveQuery(() => 
-    businessId ? db.branches.where('businessId').equals(businessId).toArray() : []
-  , [businessId]) || [];
+  const branches = useLiveQuery(() => {
+    if (!businessId) return [];
+    let collection = db.branches.where('businessId').equals(businessId);
+    if (userType === 'staff' && branchId) {
+      collection = collection.and(b => b.id === branchId);
+    }
+    return collection.toArray();
+  }, [businessId, branchId, userType]) || [];
 
   const [loading, setLoading] = useState(false);
   

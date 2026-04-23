@@ -8,7 +8,7 @@ import { useSales } from '../hooks/useSales';
 import { useLayout } from '../context/LayoutContext';
 
 export function History() {
-  const { business, userType } = useAuth();
+  const { business, userType, branchId } = useAuth();
   const { voidSale } = useSales();
   const { requestAuth } = useLayout();
   const isOwner = userType === 'owner';
@@ -26,12 +26,19 @@ export function History() {
   const sales = useLiveQuery(async () => {
     if (!business?.id) return [];
 
+    // Helper to apply branch filter
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const applyBranch = (collection: any) => {
+      if (userType === 'staff' && branchId) {
+        return collection.and((s: Sale) => s.branchId === branchId);
+      }
+      return collection;
+    };
+
     // 1. If searching for a specific receipt, ignore filters and search the ENTIRE DB
     if (searchTerm) {
-      return await db.sales
-        .where('receiptId')
-        .startsWithIgnoreCase(searchTerm)
-        .and(s => s.businessId === business.id)
+      return await applyBranch(db.sales.where('receiptId').startsWithIgnoreCase(searchTerm))
+        .and((s: Sale) => s.businessId === business.id)
         .reverse()
         .toArray();
     }
@@ -41,9 +48,8 @@ export function History() {
       const [year, month, day] = dateFilter.split('-').map(Number);
       const start = new Date(year, month - 1, day, 0, 0, 0, 0).getTime();
       const end = new Date(year, month - 1, day, 23, 59, 59, 999).getTime();
-      return await db.sales
-        .where('timestamp').between(start, end)
-        .and(s => s.businessId === business.id)
+      return await applyBranch(db.sales.where('timestamp').between(start, end))
+        .and((s: Sale) => s.businessId === business.id)
         .reverse()
         .toArray();
     }
@@ -51,25 +57,23 @@ export function History() {
     // 3. Today Filter
     if (periodFilter === 'Today') {
       const todayStart = new Date().setHours(0, 0, 0, 0);
-      return await db.sales
-        .where('timestamp').aboveOrEqual(todayStart)
-        .and(s => s.businessId === business.id)
+      return await applyBranch(db.sales.where('timestamp').aboveOrEqual(todayStart))
+        .and((s: Sale) => s.businessId === business.id)
         .reverse()
         .toArray();
     }
 
     // 4. Default: Recent Sales (Keep it fast)
-    return await db.sales
-      .where('businessId').equals(business.id)
+    return await applyBranch(db.sales.where('businessId').equals(business.id))
       .reverse()
       .limit(limit)
       .toArray();
-  }, [periodFilter, dateFilter, searchTerm, limit, business]) || [];
+  }, [periodFilter, dateFilter, searchTerm, limit, business, userType, branchId]) || [];
 
-  const activeSales = sales.filter(s => s.status !== 'voided');
-  const totalFilteredSales = activeSales.reduce((sum, s) => sum + s.total, 0);
-  const totalFilteredProfit = activeSales.reduce((sum, s) => sum + (s.totalProfit || 0), 0);
-  const totalFilteredTax = activeSales.reduce((sum, s) => sum + (s.taxAmount || 0), 0);
+  const activeSales = sales.filter((s: Sale) => s.status !== 'voided');
+  const totalFilteredSales = activeSales.reduce((sum: number, s: Sale) => sum + s.total, 0);
+  const totalFilteredProfit = activeSales.reduce((sum: number, s: Sale) => sum + (s.totalProfit || 0), 0);
+  const totalFilteredTax = activeSales.reduce((sum: number, s: Sale) => sum + (s.taxAmount || 0), 0);
 
   const handlePrint = () => {
     window.print();
@@ -175,7 +179,7 @@ export function History() {
             </tr>
           </thead>
           <tbody>
-            {sales.map(sale => (
+            {sales.map((sale: Sale) => (
               <tr key={sale.id} style={{ borderBottom: '1px solid var(--border)' }}>
                 <td style={{ padding: '16px 24px', fontWeight: 600 }} data-label="Receipt">{sale.receiptId}</td>
                 <td style={{ padding: '16px 24px' }} data-label="Time">{new Date(sale.timestamp).toLocaleTimeString()}</td>

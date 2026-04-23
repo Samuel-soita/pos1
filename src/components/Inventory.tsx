@@ -4,10 +4,12 @@ import { useState, useCallback } from 'react';
 import { useInventory } from '../hooks/useInventory';
 import { useSubscription } from '../hooks/useSubscription';
 import { useAuth } from '../hooks/useAuth';
+import { useSync } from '../hooks/useSync';
 import { type Product, type Branch } from '../db/db';
 import { parseCSV } from '../utils/csvUtils';
 import { playBeep, playChime } from '../utils/audio';
 import { InventoryRow } from './inventory/InventoryRow';
+import { TableSkeleton } from './LoadingSkeleton';
 
 export function Inventory() {
   const { products, addProduct, bulkAddProducts, updateProduct, deleteProduct, restockProduct, auditProduct } = useInventory();
@@ -41,7 +43,7 @@ export function Inventory() {
     (p.barcode || '').includes(searchTerm)
   );
 
-  const { branches } = useAuth();
+  const { branches, businessId } = useAuth();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -166,6 +168,20 @@ export function Inventory() {
       setIsImporting(false);
     }
   };
+
+  const { isSyncing } = useSync();
+
+  if (!businessId || (products.length === 0 && isSyncing)) {
+    return (
+       <div style={{ padding: '40px', display: 'flex', flexDirection: 'column', gap: '32px' }}>
+         <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+           <h1 style={{ fontSize: '2rem', fontWeight: 800 }}>Inventory</h1>
+         </header>
+         <TableSkeleton />
+         {isSyncing && <p style={{ textAlign: 'center', color: 'var(--text-muted)', fontWeight: 600 }}>Syncing your store data...</p>}
+       </div>
+    );
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '32px' }}>

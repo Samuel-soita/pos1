@@ -109,7 +109,10 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
         const eventIds = pendingBatch.map(e => e.event_id);
         await db.pos_events.where('event_id').anyOf(eventIds).modify({ sync_status: 'synced' });
 
-        // CRITICAL: Broadcast to other devices that we pushed changes
+        // Broadcast to other tabs in the same browser for instant reaction
+        broadcast.postMessage({ type: 'REMOTE_CHANGE_DETECTED', source: staffId || 'OWNER' });
+
+        // Broadcast to other devices via Supabase
         if (channelRef.current) {
           channelRef.current.send({
             type: 'broadcast',
@@ -149,8 +152,6 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
 
       let currentCursor = lastSynced;
       let hasMore = true;
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      let allIncoming: any[] = []; // Keep any for polymorphic event data
 
       while (hasMore) {
         const batch = await fetchBatch(currentCursor);
@@ -172,319 +173,337 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
           }
           
           const genuinelyNewEvents = batch.filter(e => !existingIdsMap.has(e.event_id));
-          allIncoming = [...allIncoming, ...genuinelyNewEvents];
+          
+          if (genuinelyNewEvents.length > 0) {
+            const mappedEvents = genuinelyNewEvents.map(p => ({
+                event_id: p.event_id,
+                business_id: p.business_id,
+                staff_id: p.staff_id,
+                event_type: p.event_type,
+                payload: p.payload,
+                client_timestamp: p.client_timestamp,
+                server_timestamp: p.server_timestamp,
+                hash: p.hash,
+                sync_status: 'synced' as const
+            }));
+
+            await db.transaction('rw', [
+              db.pos_events, db.products, db.sales, db.expenses, 
+              db.shifts, db.cash_logs, db.staff, db.branches, 
+              db.recurring_expenses, db.snapshots, db.settings,
+              db.inventory_ledger, db.businesses, db.suppliers, db.purchases,
+              db.counters, db.carts
+            ], async () => {
+              await db.pos_events.bulkPut(mappedEvents);
+
+              for (const evt of mappedEvents) {
+                const payload = { ...evt.payload, businessId: evt.business_id }; // Inject businessId for visibility
+                
+                switch (evt.event_type) {
+                  case 'STOCK_RESERVED':
+                  case 'stock_committed':
+                  case 'INVENTORY_RESTOCKED': {
+                    const productId = payload.productId || payload.id;
+                    const delta = payload.delta || payload.quantity || 0;
+                    const product = await db.products.get(productId);
+                    if (product) {
+                      await db.products.update(productId, {
+                        quantity: Math.round((product.quantity + delta) * 100) / 100,
+                        updatedAt: Date.now()
+                      });
+                    } else {
+                      await db.products.add({
+                        id: productId,
+                        businessId: evt.business_id,
+                        name: 'Pending Sync...',
+                        price: 0,
+                        costPrice: 0,
+                        quantity: delta,
+                        category: 'General',
+                        updatedAt: Date.now(),
+                        syncStatus: 'synced'
+                      });
+                    }
+                    
+                    await db.inventory_ledger.add({
+                      id: await generateTraceableId('INV', evt.business_id, 'SYNC', evt.event_id.substring(0, 8)),
+                      businessId: evt.business_id,
+                      productId,
+                      action: delta > 0 ? 'ADD' : 'SALE',
+                      quantity: delta,
+                      recordedAt: evt.client_timestamp,
+                      syncStatus: 'synced'
+                    });
+                    break;
+                  }
+                   case 'STOCK_RESTORED': {
+                    const productId = payload.productId || payload.id;
+                    const delta = payload.delta || 0;
+                    const product = await db.products.get(productId);
+                    if (product) {
+                      await db.products.update(productId, {
+                        quantity: product.quantity + delta,
+                        updatedAt: Date.now()
+                      });
+                      await db.inventory_ledger.add({
+                        id: await generateTraceableId('INV', evt.business_id, 'SYNC', evt.event_id.substring(0, 8)),
+                        businessId: evt.business_id,
+                        productId,
+                        action: 'VOID',
+                        quantity: delta,
+                        recordedAt: evt.client_timestamp,
+                        syncStatus: 'synced'
+                      });
+                    }
+                    break;
+                  }
+                  case 'INVENTORY_AUDITED': {
+                    const productId = payload.productId || payload.id;
+                    const physicalCount = payload.physicalCount;
+                    const variance = payload.variance || 0;
+                    if (productId && physicalCount !== undefined) {
+                      await db.products.update(productId, {
+                        quantity: physicalCount,
+                        updatedAt: Date.now()
+                      });
+                      await db.inventory_ledger.add({
+                        id: await generateTraceableId('INV', evt.business_id, 'SYNC', evt.event_id.substring(0, 8)),
+                        businessId: evt.business_id,
+                        productId,
+                        action: 'AUDIT',
+                        quantity: variance,
+                        recordedAt: evt.client_timestamp,
+                        syncStatus: 'synced'
+                      });
+                    }
+                    break;
+                  }
+                  case 'PRODUCT_CREATED': {
+                    const existing = await db.products.get(payload.id);
+                    if (existing) {
+                      await db.products.update(payload.id, {
+                        ...payload,
+                        quantity: existing.quantity,
+                        syncStatus: 'synced'
+                      });
+                    } else {
+                      await db.products.put({ ...payload, syncStatus: 'synced' });
+                    }
+                    if (payload.quantity > 0) {
+                      await db.inventory_ledger.add({
+                        id: await generateTraceableId('INV', evt.business_id, 'SYNC', evt.event_id.substring(0, 8)),
+                        businessId: evt.business_id,
+                        productId: payload.id,
+                        action: 'ADD',
+                        quantity: payload.quantity,
+                        recordedAt: evt.client_timestamp,
+                        syncStatus: 'synced'
+                      });
+                    }
+                    break;
+                  }
+                  case 'PRODUCT_UPDATED':
+                    await db.products.update(payload.id, payload);
+                    break;
+                  case 'PRODUCT_DELETED':
+                    await db.products.delete(payload.id);
+                    break;
+                   case 'SALE_CREATED':
+                    await db.sales.put({ ...payload, syncStatus: 'synced' });
+                    if (payload.items && Array.isArray(payload.items)) {
+                      for (const item of payload.items) {
+                        await db.inventory_ledger.add({
+                          id: await generateTraceableId('INV', evt.business_id, 'SYNC', evt.event_id.substring(0, 8)),
+                          businessId: evt.business_id,
+                          productId: item.productId,
+                          action: 'SALE',
+                          quantity: -item.quantity,
+                          recordedAt: evt.client_timestamp,
+                          syncStatus: 'synced'
+                        });
+                      }
+                    }
+                    break;
+                   case 'SALE_VOIDED': {
+                    const { saleId, reason } = payload;
+                    if (saleId) {
+                      await db.sales.update(saleId, { status: 'voided', voidReason: reason });
+                    }
+                    break;
+                  }
+                  case 'EXPENSE_CREATED':
+                    await db.expenses.put({ ...payload, syncStatus: 'synced' });
+                    break;
+                  case 'EXPENSE_UPDATED':
+                    await db.expenses.update(payload.id, payload);
+                    break;
+                  case 'EXPENSE_DELETED':
+                    await db.expenses.delete(payload.id);
+                    break;
+                  case 'STAFF_CREATED':
+                  case 'STAFF_UPDATED': {
+                    const staffData = {
+                      ...payload,
+                      idNumber: payload.idNumber || payload.id_number,
+                      phoneNumber: payload.phoneNumber || payload.phone_number,
+                      syncStatus: 'synced'
+                    };
+                    delete staffData.id_number;
+                    delete staffData.phone_number;
+                    await db.staff.put(staffData);
+                    break;
+                  }
+                  case 'STAFF_DELETED':
+                    await db.staff.delete(payload.id);
+                    break;
+                  case 'BRANCH_CREATED':
+                  case 'BRANCH_UPDATED':
+                    await db.branches.put(payload);
+                    break;
+                  case 'BRANCH_DELETED':
+                    await db.branches.delete(payload.id);
+                    break;
+                  case 'SUPPLIER_CREATED':
+                  case 'SUPPLIER_UPDATED': {
+                    const supplierData = {
+                      ...payload,
+                      contactPerson: payload.contactPerson || payload.contact_person,
+                      kraPin: payload.kraPin || payload.kra_pin
+                    };
+                    delete supplierData.contact_person;
+                    delete supplierData.kra_pin;
+                    await db.suppliers.put(supplierData);
+                    break;
+                  }
+                  case 'SUPPLIER_DELETED':
+                    await db.suppliers.delete(payload.id);
+                    break;
+                    case 'PURCHASE_CREATED': {
+                      await db.purchases.put(payload);
+                      for (const item of payload.items) {
+                        const product = await db.products.get(item.productId);
+                        if (product) {
+                          await db.products.update(item.productId, {
+                            quantity: Math.round((product.quantity + item.quantity) * 100) / 100,
+                            updatedAt: Date.now()
+                          });
+                        } else {
+                          await db.products.add({
+                            id: item.productId,
+                            businessId: evt.business_id,
+                            name: 'Pending Sync...',
+                            price: 0,
+                            costPrice: item.price || 0,
+                            quantity: item.quantity,
+                            category: 'General',
+                            updatedAt: Date.now(),
+                            syncStatus: 'synced'
+                          });
+                        }
+                        await db.inventory_ledger.add({
+                          id: await generateTraceableId('INV', evt.business_id, 'SYNC', evt.event_id.substring(0, 8)),
+                          businessId: evt.business_id,
+                          productId: item.productId,
+                          action: 'ADD',
+                          quantity: item.quantity,
+                          recordedAt: evt.client_timestamp,
+                          syncStatus: 'synced',
+                          traceId: `SYNC_PURCHASE_${payload.id.substring(0, 8)}`
+                        });
+                      }
+                      break;
+                    }
+                  case 'SHIFT_STARTED':
+                  case 'SHIFT_UPDATED':
+                  case 'SHIFT_ENDED':
+                    await db.shifts.put(payload);
+                    break;
+                  case 'CASH_REGISTER_OPENED':
+                  case 'CASH_REGISTER_CLOSED':
+                    await db.cash_logs.put(payload);
+                    break;
+                  case 'RECURRING_EXPENSE_CREATED':
+                  case 'RECURRING_EXPENSE_UPDATED':
+                    await db.recurring_expenses.put(payload);
+                    break;
+                  case 'RECURRING_EXPENSE_DELETED':
+                    await db.recurring_expenses.delete(payload.id);
+                    break;
+                  case 'BUSINESS_UPDATED': {
+                    const updatePayload = mapBusinessFromSync(payload);
+                    await db.businesses.update(payload.id, updatePayload);
+                    if (payload.name) {
+                      await db.settings.put({ key: 'business_name', value: payload.name });
+                    }
+                    break;
+                  }
+                  case 'SETTING_UPDATED':
+                    await db.settings.put({ key: payload.key, value: payload.value });
+                    break;
+                  case 'COUNTER_UPDATED':
+                    await db.counters.put(payload);
+                    break;
+                  case 'CART_UPDATED':
+                    await db.carts.put({
+                      id: payload.cartId,
+                      businessId: evt.business_id,
+                      staffId: evt.staff_id,
+                      items: payload.items,
+                      updatedAt: evt.client_timestamp
+                    });
+                    break;
+                }
+              }
+
+              let stockSnapshot = await db.snapshots.get(`stock_${bizId}`);
+              if (!stockSnapshot) {
+                stockSnapshot = await POSReducer.rebuildSnapshot(bizId, 'stock');
+              } else {
+                mappedEvents.forEach(evt => {
+                  stockSnapshot = POSReducer.applyEvent(stockSnapshot!, evt);
+                });
+                await db.snapshots.put(stockSnapshot);
+              }
+
+              await db.settings.put({ key: 'last_synced', value: batch[batch.length - 1].server_timestamp });
+            });
+          }
           
           currentCursor = batch[batch.length - 1].server_timestamp;
           if (batch.length < 1000) hasMore = false;
         }
       }
 
-      if (allIncoming.length > 0) {
-        const mappedEvents = allIncoming.map(p => ({
-            event_id: p.event_id,
-            business_id: p.business_id,
-            staff_id: p.staff_id,
-            event_type: p.event_type,
-            payload: p.payload,
-            client_timestamp: p.client_timestamp,
-            server_timestamp: p.server_timestamp,
-            hash: p.hash,
-            sync_status: 'synced' as const
-        }));
+      try {
+        const { data: remoteBiz, error: bizError } = await supabase
+          .from('businesses')
+          .select('package_id, expiry_date, status, staff_count, custom_feature_count, enabled_features, staff_permissions, trial_used, suspended_revenue_count, logo')
+          .eq('id', bizId)
+          .maybeSingle();
 
-        await db.transaction('rw', [
-          db.pos_events, db.products, db.sales, db.expenses, 
-          db.shifts, db.cash_logs, db.staff, db.branches, 
-          db.recurring_expenses, db.snapshots, db.settings,
-          db.inventory_ledger, db.businesses, db.suppliers, db.purchases,
-          db.counters, db.carts
-        ], async () => {
-          await db.pos_events.bulkPut(mappedEvents);
-
-          for (const evt of mappedEvents) {
-            const payload = evt.payload;
-            
-            switch (evt.event_type) {
-              case 'STOCK_RESERVED':
-              case 'stock_committed':
-              case 'INVENTORY_RESTOCKED': {
-                const productId = payload.productId || payload.id;
-                const delta = payload.delta || payload.quantity || 0;
-                const product = await db.products.get(productId);
-                if (product) {
-                  await db.products.update(productId, {
-                    quantity: Math.round((product.quantity + delta) * 100) / 100,
-                    updatedAt: Date.now()
-                  });
-                } else {
-                  await db.products.add({
-                    id: productId,
-                    businessId: evt.business_id,
-                    name: 'Pending Sync...',
-                    price: 0,
-                    costPrice: 0,
-                    quantity: delta,
-                    category: 'General',
-                    updatedAt: Date.now(),
-                    syncStatus: 'synced'
-                  });
-                }
-                
-                await db.inventory_ledger.add({
-                  id: await generateTraceableId('INV', evt.business_id, 'SYNC', evt.event_id.substring(0, 8)),
-                  businessId: evt.business_id,
-                  productId,
-                  action: delta > 0 ? 'ADD' : 'SALE',
-                  quantity: delta,
-                  recordedAt: evt.client_timestamp,
-                  syncStatus: 'synced'
-                });
-                break;
-              }
-               case 'STOCK_RESTORED': {
-                const productId = payload.productId || payload.id;
-                const delta = payload.delta || 0;
-                const product = await db.products.get(productId);
-                if (product) {
-                  await db.products.update(productId, {
-                    quantity: product.quantity + delta,
-                    updatedAt: Date.now()
-                  });
-                  await db.inventory_ledger.add({
-                    id: await generateTraceableId('INV', evt.business_id, 'SYNC', evt.event_id.substring(0, 8)),
-                    businessId: evt.business_id,
-                    productId,
-                    action: 'VOID',
-                    quantity: delta,
-                    recordedAt: evt.client_timestamp,
-                    syncStatus: 'synced'
-                  });
-                }
-                break;
-              }
-              case 'INVENTORY_AUDITED': {
-                const productId = payload.productId || payload.id;
-                const physicalCount = payload.physicalCount;
-                const variance = payload.variance || 0;
-                if (productId && physicalCount !== undefined) {
-                  await db.products.update(productId, {
-                    quantity: physicalCount,
-                    updatedAt: Date.now()
-                  });
-                  await db.inventory_ledger.add({
-                    id: await generateTraceableId('INV', evt.business_id, 'SYNC', evt.event_id.substring(0, 8)),
-                    businessId: evt.business_id,
-                    productId,
-                    action: 'AUDIT',
-                    quantity: variance,
-                    recordedAt: evt.client_timestamp,
-                    syncStatus: 'synced'
-                  });
-                }
-                break;
-              }
-              case 'PRODUCT_CREATED': {
-                const existing = await db.products.get(payload.id);
-                if (existing) {
-                  await db.products.update(payload.id, {
-                    ...payload,
-                    quantity: existing.quantity,
-                    syncStatus: 'synced'
-                  });
-                } else {
-                  await db.products.put({ ...payload, syncStatus: 'synced' });
-                }
-                if (payload.quantity > 0) {
-                  await db.inventory_ledger.add({
-                    id: await generateTraceableId('INV', evt.business_id, 'SYNC', evt.event_id.substring(0, 8)),
-                    businessId: evt.business_id,
-                    productId: payload.id,
-                    action: 'ADD',
-                    quantity: payload.quantity,
-                    recordedAt: evt.client_timestamp,
-                    syncStatus: 'synced'
-                  });
-                }
-                break;
-              }
-              case 'PRODUCT_UPDATED':
-                await db.products.update(payload.id, payload);
-                break;
-              case 'PRODUCT_DELETED':
-                await db.products.delete(payload.id);
-                break;
-               case 'SALE_CREATED':
-                await db.sales.put({ ...payload, syncStatus: 'synced' });
-                if (payload.items && Array.isArray(payload.items)) {
-                  for (const item of payload.items) {
-                    await db.inventory_ledger.add({
-                      id: await generateTraceableId('INV', evt.business_id, 'SYNC', evt.event_id.substring(0, 8)),
-                      businessId: evt.business_id,
-                      productId: item.productId,
-                      action: 'SALE',
-                      quantity: -item.quantity,
-                      recordedAt: evt.client_timestamp,
-                      syncStatus: 'synced'
-                    });
-                  }
-                }
-                break;
-               case 'SALE_VOIDED': {
-                const { saleId, reason } = payload;
-                if (saleId) {
-                  await db.sales.update(saleId, { status: 'voided', voidReason: reason });
-                }
-                break;
-              }
-              case 'EXPENSE_CREATED':
-                await db.expenses.put({ ...payload, syncStatus: 'synced' });
-                break;
-              case 'EXPENSE_UPDATED':
-                await db.expenses.update(payload.id, payload);
-                break;
-              case 'EXPENSE_DELETED':
-                await db.expenses.delete(payload.id);
-                break;
-              case 'STAFF_CREATED':
-              case 'STAFF_UPDATED': {
-                const staffData = {
-                  ...payload,
-                  idNumber: payload.idNumber || payload.id_number,
-                  phoneNumber: payload.phoneNumber || payload.phone_number,
-                  syncStatus: 'synced'
-                };
-                delete staffData.id_number;
-                delete staffData.phone_number;
-                await db.staff.put(staffData);
-                break;
-              }
-              case 'STAFF_DELETED':
-                await db.staff.delete(payload.id);
-                break;
-              case 'BRANCH_CREATED':
-              case 'BRANCH_UPDATED':
-                await db.branches.put(payload);
-                break;
-              case 'BRANCH_DELETED':
-                await db.branches.delete(payload.id);
-                break;
-              case 'SUPPLIER_CREATED':
-              case 'SUPPLIER_UPDATED': {
-                const supplierData = {
-                  ...payload,
-                  contactPerson: payload.contactPerson || payload.contact_person,
-                  kraPin: payload.kraPin || payload.kra_pin
-                };
-                delete supplierData.contact_person;
-                delete supplierData.kra_pin;
-                await db.suppliers.put(supplierData);
-                break;
-              }
-              case 'SUPPLIER_DELETED':
-                await db.suppliers.delete(payload.id);
-                break;
-                case 'PURCHASE_CREATED': {
-                  await db.purchases.put(payload);
-                  for (const item of payload.items) {
-                    const product = await db.products.get(item.productId);
-                    if (product) {
-                      await db.products.update(item.productId, {
-                        quantity: Math.round((product.quantity + item.quantity) * 100) / 100,
-                        updatedAt: Date.now()
-                      });
-                    } else {
-                      await db.products.add({
-                        id: item.productId,
-                        businessId: evt.business_id,
-                        name: 'Pending Sync...',
-                        price: 0,
-                        costPrice: item.price || 0,
-                        quantity: item.quantity,
-                        category: 'General',
-                        updatedAt: Date.now(),
-                        syncStatus: 'synced'
-                      });
-                    }
-                    await db.inventory_ledger.add({
-                      id: await generateTraceableId('INV', evt.business_id, 'SYNC', evt.event_id.substring(0, 8)),
-                      businessId: evt.business_id,
-                      productId: item.productId,
-                      action: 'ADD',
-                      quantity: item.quantity,
-                      recordedAt: evt.client_timestamp,
-                      syncStatus: 'synced',
-                      traceId: `SYNC_PURCHASE_${payload.id.substring(0, 8)}`
-                    });
-                  }
-                  break;
-                }
-              case 'SHIFT_STARTED':
-              case 'SHIFT_UPDATED':
-              case 'SHIFT_ENDED':
-                await db.shifts.put(payload);
-                break;
-              case 'CASH_REGISTER_OPENED':
-              case 'CASH_REGISTER_CLOSED':
-                await db.cash_logs.put(payload);
-                break;
-              case 'RECURRING_EXPENSE_CREATED':
-              case 'RECURRING_EXPENSE_UPDATED':
-                await db.recurring_expenses.put(payload);
-                break;
-              case 'RECURRING_EXPENSE_DELETED':
-                await db.recurring_expenses.delete(payload.id);
-                break;
-              case 'BUSINESS_UPDATED': {
-                const updatePayload = mapBusinessFromSync(payload);
-                await db.businesses.update(payload.id, updatePayload);
-                if (payload.name) {
-                  await db.settings.put({ key: 'business_name', value: payload.name });
-                }
-                break;
-              }
-              case 'SETTING_UPDATED':
-                await db.settings.put({ key: payload.key, value: payload.value });
-                break;
-              case 'COUNTER_UPDATED':
-                await db.counters.put(payload);
-                break;
-              case 'CART_UPDATED':
-                await db.carts.put({
-                  id: payload.cartId,
-                  businessId: evt.business_id,
-                  staffId: evt.staff_id,
-                  items: payload.items,
-                  updatedAt: evt.client_timestamp
-                });
-                break;
-            }
-          }
-
-          let stockSnapshot = await db.snapshots.get(`stock_${bizId}`);
-          if (!stockSnapshot) {
-            stockSnapshot = await POSReducer.rebuildSnapshot(bizId, 'stock');
+        if (bizError) {
+          if (bizError.code === 'PGRST204' || bizError.message?.includes('column "logo" does not exist')) {
+             console.warn('[Sync] Business fetch failed due to missing column (likely "logo"). Retrying without logo...');
+             const { data: fallbackBiz } = await supabase
+                .from('businesses')
+                .select('package_id, expiry_date, status, staff_count, custom_feature_count, enabled_features, staff_permissions, trial_used, suspended_revenue_count')
+                .eq('id', bizId)
+                .maybeSingle();
+             
+             if (fallbackBiz) {
+                const updatePayload = mapBusinessFromSync(fallbackBiz);
+                await db.businesses.update(bizId, updatePayload);
+             }
           } else {
-            mappedEvents.forEach(evt => {
-              stockSnapshot = POSReducer.applyEvent(stockSnapshot!, evt);
-            });
-            await db.snapshots.put(stockSnapshot);
+             throw bizError;
           }
-
-          const maxServerTime = Math.max(...allIncoming.map(e => e.server_timestamp));
-          await db.settings.put({ key: 'last_synced', value: maxServerTime });
-        });
-      }
-
-      const { data: remoteBiz } = await supabase
-        .from('businesses')
-        .select('package_id, expiry_date, status, staff_count, custom_feature_count, enabled_features, staff_permissions, trial_used, suspended_revenue_count, logo')
-        .eq('id', bizId)
-        .maybeSingle();
-
-      if (remoteBiz) {
-        const updatePayload = mapBusinessFromSync(remoteBiz);
-        await db.businesses.update(bizId, updatePayload);
-        localStorage.setItem(`entitlement_${bizId}_last_sync`, Date.now().toString());
+        } else if (remoteBiz) {
+          const updatePayload = mapBusinessFromSync(remoteBiz);
+          await db.businesses.update(bizId, updatePayload);
+          localStorage.setItem(`entitlement_${bizId}_last_sync`, Date.now().toString());
+        }
+      } catch (bizErr) {
+        console.error('[Sync] Business record sync failed:', bizErr);
       }
 
     } catch (err: unknown) {
@@ -559,6 +578,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       });
 
       localStorage.removeItem('initial_sync_done');
+      broadcast.postMessage({ type: 'STATE_REBUILT' });
       await syncAll();
     } catch (err) {
       console.error("Reconstruction failed:", err);
@@ -614,6 +634,8 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
         if (payload.source !== (staffId || 'OWNER')) {
           console.log('[Sync] Remote change (Broadcast) detected. Instant sync triggered.');
           syncAll();
+          // Inform other tabs so they also show syncing state or refresh
+          broadcast.postMessage({ type: 'REMOTE_CHANGE_DETECTED', source: payload.source });
         }
       })
       .on('presence', { event: 'sync' }, () => {
@@ -669,17 +691,28 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
     }
   }, [isOnline, pendingCount, syncAll]);
 
-  // Handle Broadcast Messages (Instant Local Sync)
+  // Handle Broadcast Messages (Instant Local & Remote Sync)
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
-      if (event.data.type === 'LOCAL_CHANGE_DETECTED') {
-        console.log('[Sync] Local change detected in another tab. Triggering sync...');
-        syncAll();
+      const { type, source } = event.data;
+      if (type === 'LOCAL_CHANGE_DETECTED') {
+        console.log('[Sync] Local change detected in another tab. Ensuring data parity...');
+        // No need to syncAll here as useLiveQuery handles the data, 
+        // but we might want to check if we should push
+        pushLocalChanges();
+      } else if (type === 'REMOTE_CHANGE_DETECTED') {
+        if (source !== (staffId || 'OWNER')) {
+          console.log('[Sync] Remote change signaled by another tab. Catching up...');
+          syncAll();
+        }
+      } else if (type === 'STATE_REBUILT') {
+        console.log('[Sync] State was rebuilt in another tab. Refreshing local view...');
+        window.location.reload(); // Hard refresh to ensure clean state across tabs
       }
     };
     broadcast.addEventListener('message', handleMessage);
     return () => broadcast.removeEventListener('message', handleMessage);
-  }, [syncAll]);
+  }, [syncAll, pushLocalChanges, staffId]);
 
   // Immediate sync on businessId detection
   useEffect(() => {

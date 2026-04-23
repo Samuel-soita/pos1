@@ -15,20 +15,30 @@ import { PurchaseHistory } from './procurement/PurchaseHistory';
 
 export function Procurement({ initialView = 'purchases' }: { initialView?: 'purchases' | 'suppliers' }) {
   const [activeView, setActiveView] = useState<'purchases' | 'suppliers'>(initialView);
-  const { businessId, business, branchId } = useAuth();
+  const { businessId, business, branchId, userType } = useAuth();
   const { requestAuth } = useLayout();
   
   const suppliers = useLiveQuery(() => 
     businessId ? db.suppliers.where('businessId').equals(businessId).toArray() : []
   , [businessId]) || [];
 
-  const purchases = useLiveQuery(() => 
-    businessId ? db.purchases.where('businessId').equals(businessId).reverse().sortBy('timestamp') : []
-  , [businessId]) || [];
+  const purchases = useLiveQuery(() => {
+    if (!businessId) return [];
+    let collection = db.purchases.where('businessId').equals(businessId);
+    if (userType === 'staff' && branchId) {
+      collection = collection.and(p => p.branchId === branchId);
+    }
+    return collection.reverse().sortBy('timestamp');
+  }, [businessId, branchId, userType]) || [];
 
-  const products = useLiveQuery(() => 
-    businessId ? db.products.where('businessId').equals(businessId).toArray() : []
-  , [businessId]) || [];
+  const products = useLiveQuery(() => {
+    if (!businessId) return [];
+    let collection = db.products.where('businessId').equals(businessId);
+    if (userType === 'staff' && branchId) {
+      collection = collection.and(p => p.branchId === branchId);
+    }
+    return collection.toArray();
+  }, [businessId, branchId, userType]) || [];
 
   const [showAddSupplier, setShowAddSupplier] = useState(false);
   const [showAddPurchase, setShowAddPurchase] = useState(false);
